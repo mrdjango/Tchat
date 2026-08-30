@@ -223,12 +223,15 @@ test('the broker refuses to relay paths outside the inference surface', async ()
   assert.equal(calls.length, 0);
 });
 
-test('healthz needs no credentials', async () => {
+test('healthz needs no credentials and matches the stack-wide convention', async () => {
   const app = createApp({ config, cache: createCache(), fetchImpl: makeFetch().impl, logger: silent });
 
   const response = await app(new Request('http://broker.internal/healthz'));
 
   assert.equal(response.status, 200);
+  // Exact lowercase match: the Compose healthcheck greps `grep -qx ok`, and a
+  // silent case mismatch here is exactly what shipped broken to production.
+  assert.equal(await response.text(), 'ok');
 });
 
 test('canonical JSON matches the Python serialization Django hashes', () => {
