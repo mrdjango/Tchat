@@ -20,15 +20,12 @@ interface:
   termsOfService:
     externalUrl: 'https://tensorgrid.space/terms'
     openNewTab: true
-  # `modelSpecs.enforce` is on, so a request is only valid when it carries a
-  # spec. Leaving these enabled lets the UI offer a bare endpoint or preset
-  # with no spec attached, which the server then rejects with "No model spec
-  # selected" — upstream warns about exactly this combination at startup.
-  # Turning them off also delivers the "users cannot pick their own provider"
-  # requirement more completely than enforce alone.
-  modelSelect: false
-  parameters: false
-  presets: false
+  # Users pick any model the Gateway catalog offers. Safe to enable because
+  # `modelSpecs.enforce` is off; with it on, the UI could offer a selection
+  # carrying no spec, which the server then rejects as "No model spec selected".
+  modelSelect: true
+  parameters: true
+  presets: true
   bookmarks: true
   multiConvo: true
   fileSearch: true
@@ -74,12 +71,33 @@ endpoints:
         # Live from the Gateway catalog via /v1/models through the broker, so
         # adding a model in the Gateway admin publishes it here with no redeploy.
         fetch: true
-        # Fallback shown before the first successful fetch. Keep in step with
-        # the Gateway catalog.
+        # Shown before the first successful fetch, and whenever the Gateway is
+        # unreachable. Every id below is verified present in the catalog;
+        # embedding and transcription models are deliberately left out because
+        # they cannot serve a chat completion.
         default:
-          - 'gpt-4o-mini'
+          - 'gpt-5.6-terra'
+          - 'gpt-5.6-sol'
+          - 'gpt-5.6-luna'
+          - 'gpt-5.5'
+          - 'gpt-5.4'
+          - 'gpt-5.4-mini'
+          - 'claude-opus-5'
+          - 'claude-sonnet-5'
+          - 'claude-haiku-4-5'
+          - 'deepseek-v4-flash'
+          - 'deepseek-ai/deepseek-v4-pro-0813'
+          - 'moonshotai/kimi-k3'
+          - 'minimaxai/minimax-m3'
+          - 'nvidia/nemotron-3-super-120b-a12b'
+          - 'openai/gpt-oss-120b'
+          - 'openai/gpt-oss-20b'
+          - 'Qwen/Qwen3.6-35B-A3B-FP8'
+          - 'Qwen3.8-27B'
       titleConvo: true
-      titleModel: 'current_model'
+      # Titles bill the same as any other call, so they use the cheapest model
+      # in the catalog rather than whatever the conversation is running on.
+      titleModel: 'gpt-5.4-mini'
       modelDisplayLabel: 'TensorGrid'
       iconURL: '/images/tchat-mark.svg'
 
@@ -102,17 +120,23 @@ endpoints:
         default:
           - 'claude-opus-5'
           - 'claude-sonnet-5'
-          - 'claude-haiku-4-5-20251001'
+          - 'claude-fable-5'
+          - 'claude-opus-4-8'
+          - 'claude-opus-4-7'
+          - 'claude-opus-4-6'
+          - 'claude-sonnet-4-6'
+          - 'claude-haiku-4-5'
       titleConvo: true
-      titleModel: 'claude-haiku-4-5-20251001'
+      titleModel: 'claude-haiku-4-5'
       modelDisplayLabel: 'TensorGrid Claude'
       iconURL: '/images/tchat-mark.svg'
 
-# `enforce: true` is what actually locks the product down: the user's choice is
-# limited to this list, and a stored preset naming any other endpoint is
-# ignored rather than honoured.
+# Starting points, not a whitelist. Provider lockdown is done by there being
+# exactly two endpoints, both aimed at the broker, with no provider API key
+# anywhere in the deployment — `enforce` would additionally freeze the model
+# list, which stops users choosing from the Gateway catalog they are paying for.
 modelSpecs:
-  enforce: true
+  enforce: false
   prioritize: true
   addedEndpoints: []
   list:
@@ -122,7 +146,7 @@ modelSpecs:
       default: true
       preset:
         endpoint: 'TensorGrid'
-        model: 'gpt-4o-mini'
+        model: 'gpt-5.6-terra'
 
     - name: 'tensorgrid-claude'
       label: 'TensorGrid Claude'
