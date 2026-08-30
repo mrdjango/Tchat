@@ -144,14 +144,19 @@ services:
   # credential, and Tchat's whole point is that inference only leaves through
   # the broker. Enable with `--profile rag` once the Gateway catalog exposes an
   # embeddings model and EMBEDDINGS_* is set in Doppler.
+  #
+  # These two variables carry defaults rather than `:?` because Compose
+  # interpolates profile-gated services too — a required-value marker here
+  # would block the whole stack from rendering. Set real values in the Komodo
+  # stack environment before enabling the profile.
   tchat-vectordb:
     profiles: ["rag"]
     image: pgvector/pgvector:0.8.0-pg15-trixie
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${TCHAT_VECTOR_DB:-tchat_vectors}
-      POSTGRES_USER: ${TCHAT_VECTOR_USER:?set in the Komodo stack environment}
-      POSTGRES_PASSWORD: ${TCHAT_VECTOR_PASSWORD:?set in the Komodo stack environment}
+      POSTGRES_USER: ${TCHAT_VECTOR_USER:-tchat}
+      POSTGRES_PASSWORD: ${TCHAT_VECTOR_PASSWORD:-}
     volumes:
       - tchat_vector_data:/var/lib/postgresql/data
     healthcheck:
@@ -169,8 +174,8 @@ services:
     environment:
       DB_HOST: tchat-vectordb
       POSTGRES_DB: ${TCHAT_VECTOR_DB:-tchat_vectors}
-      POSTGRES_USER: ${TCHAT_VECTOR_USER:?set in the Komodo stack environment}
-      POSTGRES_PASSWORD: ${TCHAT_VECTOR_PASSWORD:?set in the Komodo stack environment}
+      POSTGRES_USER: ${TCHAT_VECTOR_USER:-tchat}
+      POSTGRES_PASSWORD: ${TCHAT_VECTOR_PASSWORD:-}
       RAG_PORT: "8000"
     depends_on:
       tchat-vectordb:
