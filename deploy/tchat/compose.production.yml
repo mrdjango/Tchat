@@ -117,6 +117,31 @@ services:
     networks:
       - internal
 
+  # LibreChat's own admin console. Kept off the public login surface: it is
+  # reachable only on tchat-admin.tensorgrid.space, which TensorGrid's edge
+  # nginx puts behind Cloudflare Access, and it holds no credentials of its
+  # own — it authenticates against tchat-api over the internal network.
+  tchat-admin:
+    image: registry.librechat.ai/clickhouse/librechat-admin-panel:latest
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      API_SERVER_URL: http://tchat-api:3080
+      VITE_API_BASE_URL: https://${TCHAT_PUBLIC_HOST:-chat.tensorgrid.space}
+      SESSION_SECRET: ${ADMIN_PANEL_SESSION_SECRET:?set in the Komodo stack environment}
+      SESSION_COOKIE_SECURE: "true"
+    depends_on:
+      tchat-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - internal
+
   tchat-proxy:
     image: nginx:1.29-alpine
     restart: unless-stopped
@@ -127,6 +152,9 @@ services:
       - ./branding:/srv/branding:ro
     depends_on:
       tchat-api:
+        condition: service_healthy
+        restart: true
+      tchat-admin:
         condition: service_healthy
         restart: true
     healthcheck:
