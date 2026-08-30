@@ -20,9 +20,15 @@ interface:
   termsOfService:
     externalUrl: 'https://tensorgrid.space/terms'
     openNewTab: true
-  modelSelect: true
-  parameters: true
-  presets: true
+  # `modelSpecs.enforce` is on, so a request is only valid when it carries a
+  # spec. Leaving these enabled lets the UI offer a bare endpoint or preset
+  # with no spec attached, which the server then rejects with "No model spec
+  # selected" — upstream warns about exactly this combination at startup.
+  # Turning them off also delivers the "users cannot pick their own provider"
+  # requirement more completely than enforce alone.
+  modelSelect: false
+  parameters: false
+  presets: false
   bookmarks: true
   multiConvo: true
   fileSearch: true
