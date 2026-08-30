@@ -1,0 +1,22 @@
+# Tchat API image.
+#
+# A thin wrapper over the upstream LibreChat image so that (a) no LibreChat
+# source is modified and upstream releases can be adopted by bumping one tag,
+# and (b) runtime secrets come from Doppler at process start instead of a .env
+# file on the host.
+ARG LIBRECHAT_IMAGE=registry.librechat.ai/danny-avila/librechat-dev
+ARG LIBRECHAT_TAG=latest
+FROM ${LIBRECHAT_IMAGE}:${LIBRECHAT_TAG}
+
+USER root
+RUN apk add --no-cache curl gnupg \
+    && curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh | sh \
+    && doppler --version
+COPY entrypoint.sh /usr/local/bin/tchat-entrypoint
+RUN chmod 0755 /usr/local/bin/tchat-entrypoint
+USER node
+
+# Doppler injects the tchat-be-fe config into the process environment and execs
+# the server, so no secret is ever written to disk or baked into a layer.
+ENTRYPOINT ["tchat-entrypoint"]
+CMD ["npm", "run", "backend"]
