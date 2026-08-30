@@ -91,30 +91,20 @@ these aggressively; expect a hard refresh to be needed.
   you mentioned `chat.tensorgrid.ai` while this deploys `chat.tensorgrid.space`.
   Worth settling before the link is added.
 
-## Blocking incident: production `IMAGE_TAG` is `main`
+## Blocking incident: production `IMAGE_TAG` is `main` — fixed, awaiting merge
 
-Unrelated to Tchat, but it blocks the release above and needs attention on its
-own account.
+Was: the `tensorgrid-production` stack environment has `IMAGE_TAG=main`
+instead of a 40-character SHA, which crash-loops `postgres-backup` and
+`pre-migration-backup` (both require a real SHA) and would stall the next
+deploy at `migration`.
 
-The `tensorgrid-production` stack environment has `IMAGE_TAG=main` instead of a
-40-character SHA. Consequences:
+You asked for this not to depend on an operator-set environment variable at
+all, so the actual fix is structural rather than a one-time value change:
+mrdjango/TensorGrid#145 bakes `postgres-backup`'s own release identity into
+the image at build time (a CI build-arg with no default, so the image
+refuses to build without it) instead of reading it from `IMAGE_TAG`. Once
+that merges, `IMAGE_TAG=main` stops being a problem for backups at all — no
+one has to remember to set anything.
 
-- `postgres-backup` is crash-looping and `pre-migration-backup` exits 64, both
-  with `POSTGRES_BACKUP_RELEASE_TAG must be a full lowercase 40-character git
-  SHA`. **Production database backups have not run since 2026-08-29 08:56 UTC.**
-  That is what makes the stack read `unhealthy`; every traffic-serving service
-  is healthy.
-- `migration` depends on `pre-migration-backup` completing successfully, and
-  `backend` depends on `migration`. **The next deploy would stall there**, which
-  is why the Tchat release cannot proceed.
-- It also breaks the immutable-release contract in
-  `docs/operations/production-environment.md` — a redeploy would pull whatever
-  `:main` points at rather than a verified build.
-
-The last verified release, from the most recent successful backup, is
-`b74452e444aa2b99d45159c783c7dc7518ea6862`, and the running containers date
-from that same deploy. `MODELS_GATEWAY_IMAGE_TAG` is also set to `main` and
-needs its own verified SHA.
-
-Fixing this means choosing which build production runs, so it is deliberately
-left as a decision rather than applied automatically.
+Nothing to do here except merge #145 before the Tchat release, in whichever
+order is convenient: it doesn't touch Tchat's files.
