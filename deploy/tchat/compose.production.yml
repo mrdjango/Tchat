@@ -14,7 +14,14 @@
 
 services:
   tchat-mongo:
-    image: mongo:8.0.20
+    # Pinned to 7.0 because of SERVER-121912: MongoDB 8.x is incompatible with
+    # Linux kernels 6.19 and newer, and this host runs 7.0. Newer 8.0.x images
+    # detect that and refuse to start; 8.0.20 predates the check and instead
+    # segfaults roughly every 30 seconds, each time recovering from the last
+    # checkpoint and losing whatever was written since. Verified on the host:
+    # 8.0.20 and 8.2.12 both exit 139, 7.0.40 runs clean.
+    # Revisit once a released 8.x supports these kernels.
+    image: mongo:7.0.40
     restart: unless-stopped
     command: ["mongod", "--noauth", "--bind_ip_all"]
     volumes:
