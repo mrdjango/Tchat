@@ -48,15 +48,23 @@ after the first build that both are private and that the Komodo registry
 account can read them. This could not be checked in advance: the `gh` token on
 this machine has no `read:packages` scope.
 
-## 3. First accounts
+## 3. Sign-in
 
-Registration is closed, so create accounts by hand. **Use the same email as the
-user's TensorGrid account** — that is what the broker resolves to a Gateway
-subject, and a mismatch means the user can sign in but not send a message.
+Every TensorGrid user can sign in with their existing account, and the Tchat
+user is created automatically on first sign-in. That needs OIDC switched on —
+three short steps in `OIDC.md` (generate a signing key, register the client,
+set the `OPENID_*` values).
+
+Until then Tchat has no way for anyone to log in, since registration is closed
+and no local accounts exist. To create a break-glass admin in the meantime:
 
 ```bash
 docker compose -p tchat exec tchat-api npm run create-user
 ```
+
+Use the **exact email of that person's TensorGrid account** — it is what the
+broker resolves to a gateway subject, and a mismatch means they can sign in but
+not send a message.
 
 ## 4. Brand assets
 
@@ -79,32 +87,27 @@ these aggressively; expect a hard refresh to be needed.
 
 ## Still open
 
-- **OIDC.** Tchat cannot yet sign users in through TensorGrid, because Django
-  is not an identity provider. `OIDC.md` has the full contract and the cutover.
-  Until then, the manual account creation in section 3 is what couples a chat
-  user to their TensorGrid credit.
 - **RAG / file search.** `tchat-vectordb` and `tchat-rag` are defined behind
   the `rag` Compose profile and are not started. They need an embeddings
   credential, and Tchat's premise is that inference only leaves through the
-  broker — so enable them once the Gateway catalog exposes an embeddings model.
+  broker, so enable them once the Gateway catalog exposes an embeddings model.
 - **Sidebar link.** Nothing in the TensorGrid frontend links to Tchat yet, and
   you mentioned `chat.tensorgrid.ai` while this deploys `chat.tensorgrid.space`.
   Worth settling before the link is added.
 
-## Blocking incident: production `IMAGE_TAG` is `main` — fixed, awaiting merge
+## Backup incident: resolved
 
-Was: the `tensorgrid-production` stack environment has `IMAGE_TAG=main`
-instead of a 40-character SHA, which crash-loops `postgres-backup` and
-`pre-migration-backup` (both require a real SHA) and would stall the next
-deploy at `migration`.
+`tensorgrid-production` ran with `IMAGE_TAG=main` instead of a 40-character
+SHA, which crash-looped `postgres-backup` and `pre-migration-backup` and would
+have stalled the next deploy at `migration`.
 
-You asked for this not to depend on an operator-set environment variable at
-all, so the actual fix is structural rather than a one-time value change:
-mrdjango/TensorGrid#145 bakes `postgres-backup`'s own release identity into
-the image at build time (a CI build-arg with no default, so the image
-refuses to build without it) instead of reading it from `IMAGE_TAG`. Once
-that merges, `IMAGE_TAG=main` stops being a problem for backups at all — no
-one has to remember to set anything.
+Both parts are fixed:
 
-Nothing to do here except merge #145 before the Tchat release, in whichever
-order is convenient: it doesn't touch Tchat's files.
+- Your own CI redeploy restored the acute failure — backups completed again
+  from 2026-08-30 09:16 UTC.
+- mrdjango/TensorGrid#145 removed the cause structurally: `postgres-backup`
+  now bakes its release identity into the image at build time (a CI build-arg
+  with no default, so the image refuses to build without it) rather than
+  reading `IMAGE_TAG`. That variable's format can no longer break backups.
+- mrdjango/TensorGrid#147 fixed the smoke build in `tests.yml`, which #145
+  had missed.
