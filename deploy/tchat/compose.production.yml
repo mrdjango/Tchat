@@ -1,0 +1,208 @@
+# Tchat production stack (Komodo stack `tchat-production`, Compose project `tchat`).
+#
+# Deployed separately from TensorGrid: its own database, its own release
+# cadence, no shared state with Django. The only seam between the two stacks is
+# the `tchat_edge` network, which TensorGrid's edge nginx joins so it can route
+# chat.tensorgrid.space here.
+#
+# Two sources of configuration, deliberately:
+#   * `${VAR:?}` below  — stack topology and infra credentials, supplied by the
+#     Komodo stack environment (written from Doppler by the deploy path, the
+#     same way TensorGrid's stack environment is).
+#   * `doppler run`     — every application secret, fetched by tchat-api and
+#     tchat-broker at process start from tchat-be-fe. Never written to disk.
+
+services:
+  tchat-mongo:
+    image: mongo:8.0.20
+    restart: unless-stopped
+    command: ["mongod", "--noauth", "--bind_ip_all"]
+    volumes:
+      - tchat_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - internal
+
+  tchat-meili:
+    image: getmeili/meilisearch:v1.35.1
+    restart: unless-stopped
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set in the Komodo stack environment}
+    volumes:
+      - tchat_meili_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:7700/health | grep -q available"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - internal
+
+  tchat-broker:
+    image: ${TCHAT_BROKER_IMAGE:-ghcr.io/mrdjango/tchat-broker}:${TCHAT_IMAGE_TAG:?set an immutable Tchat image tag}
+    restart: unless-stopped
+    environment:
+      DOPPLER_TOKEN: ${DOPPLER_TOKEN:?set the tchat-be-fe service token in the Komodo stack environment}
+      DOPPLER_PROJECT: ${DOPPLER_PROJECT:-tchat-be-fe}
+      DOPPLER_CONFIG: ${DOPPLER_CONFIG:-prd}
+      # Topology belongs next to the services it names; Doppler owns the rest.
+      DOPPLER_PRESERVE_ENV: TCHAT_BROKER_PORT,DJANGO_INTERNAL_BASE_URL,MODELS_GATEWAY_INTERNAL_BASE_URL
+      TCHAT_BROKER_PORT: "8081"
+      # Reached over `tensorgrid_edge`; TensorGrid publishes no host port for
+      # either service, so these stay inside Docker networking.
+      DJANGO_INTERNAL_BASE_URL: ${DJANGO_INTERNAL_BASE_URL:-http://backend:8000}
+      MODELS_GATEWAY_INTERNAL_BASE_URL: ${MODELS_GATEWAY_INTERNAL_BASE_URL:-http://models-gateway:3000}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8081/healthz | grep -qx ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+      - tensorgrid_edge
+
+  tchat-api:
+    image: ${TCHAT_API_IMAGE:-ghcr.io/mrdjango/tchat-api}:${TCHAT_IMAGE_TAG:?set an immutable Tchat image tag}
+    restart: unless-stopped
+    environment:
+      DOPPLER_TOKEN: ${DOPPLER_TOKEN:?set the tchat-be-fe service token in the Komodo stack environment}
+      DOPPLER_PROJECT: ${DOPPLER_PROJECT:-tchat-be-fe}
+      DOPPLER_CONFIG: ${DOPPLER_CONFIG:-prd}
+      DOPPLER_PRESERVE_ENV: HOST,PORT,NODE_ENV,TRUST_PROXY,MONGO_URI,MEILI_HOST,RAG_API_URL,RAG_PORT,CONFIG_PATH,LIBRECHAT_TEMP_CREDENTIALS_PATH,TCHAT_BROKER_BASE_URL,NO_PROXY,no_proxy
+      HOST: 0.0.0.0
+      PORT: "3080"
+      NODE_ENV: production
+      # Three proxies sit in front: Cloudflare, TensorGrid's edge nginx, and
+      # tchat-proxy. Without this Express reads the edge's address as the
+      # client IP and every user shares one rate-limit bucket.
+      TRUST_PROXY: "3"
+      MONGO_URI: mongodb://tchat-mongo:27017/tchat
+      MEILI_HOST: http://tchat-meili:7700
+      RAG_PORT: "8000"
+      RAG_API_URL: http://tchat-rag:8000
+      CONFIG_PATH: /app/librechat.yaml
+      LIBRECHAT_TEMP_CREDENTIALS_PATH: /app/data/.env.temp
+      # The only model destination Tchat knows about.
+      TCHAT_BROKER_BASE_URL: http://tchat-broker:8081/v1
+      NO_PROXY: localhost,127.0.0.1,::1,tchat-mongo,tchat-meili,tchat-broker,tchat-rag,tchat-vectordb
+      no_proxy: localhost,127.0.0.1,::1,tchat-mongo,tchat-meili,tchat-broker,tchat-rag,tchat-vectordb
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - tchat_uploads:/app/uploads
+      - tchat_images:/app/client/public/images
+      - tchat_logs:/app/logs
+      - tchat_data:/app/data
+    depends_on:
+      tchat-mongo:
+        condition: service_healthy
+      tchat-meili:
+        condition: service_healthy
+      tchat-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3080/readyz | grep -qx OK"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - internal
+
+  tchat-proxy:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    labels:
+      tchat.release: ${TCHAT_IMAGE_TAG:-unset}
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./branding:/srv/branding:ro
+    depends_on:
+      tchat-api:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz | grep -qx ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # No published ports: TensorGrid's edge nginx reaches this over tchat_edge
+    # and is the only thing that terminates TLS.
+    networks:
+      - internal
+      - tchat_edge
+
+  # Document RAG. Off by default: its embeddings would need a provider
+  # credential, and Tchat's whole point is that inference only leaves through
+  # the broker. Enable with `--profile rag` once the Gateway catalog exposes an
+  # embeddings model and EMBEDDINGS_* is set in Doppler.
+  #
+  # These two variables carry defaults rather than `:?` because Compose
+  # interpolates profile-gated services too — a required-value marker here
+  # would block the whole stack from rendering. Set real values in the Komodo
+  # stack environment before enabling the profile.
+  tchat-vectordb:
+    profiles: ["rag"]
+    image: pgvector/pgvector:0.8.0-pg15-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${TCHAT_VECTOR_DB:-tchat_vectors}
+      POSTGRES_USER: ${TCHAT_VECTOR_USER:-tchat}
+      POSTGRES_PASSWORD: ${TCHAT_VECTOR_PASSWORD:-}
+    volumes:
+      - tchat_vector_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  tchat-rag:
+    profiles: ["rag"]
+    image: registry.librechat.ai/danny-avila/librechat-rag-api-dev-lite:latest
+    restart: unless-stopped
+    environment:
+      DB_HOST: tchat-vectordb
+      POSTGRES_DB: ${TCHAT_VECTOR_DB:-tchat_vectors}
+      POSTGRES_USER: ${TCHAT_VECTOR_USER:-tchat}
+      POSTGRES_PASSWORD: ${TCHAT_VECTOR_PASSWORD:-}
+      RAG_PORT: "8000"
+    depends_on:
+      tchat-vectordb:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  tchat_mongo_data:
+  tchat_meili_data:
+  tchat_uploads:
+  tchat_images:
+  tchat_logs:
+  tchat_data:
+  tchat_vector_data:
+
+networks:
+  internal:
+  # Both are created and owned by the TensorGrid stack, which is why it deploys
+  # first. Nothing here needs a manual `docker network create`; if either is
+  # missing, TensorGrid has not been released with the Tchat routing yet.
+  #
+  # tchat_edge      — TensorGrid's edge nginx -> tchat-proxy (ingress).
+  # tensorgrid_edge — tchat-broker -> backend, models-gateway (egress).
+  tchat_edge:
+    external: true
+    name: tchat_edge
+  tensorgrid_edge:
+    external: true
+    name: tensorgrid_edge

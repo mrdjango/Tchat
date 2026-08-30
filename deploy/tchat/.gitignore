@@ -1,0 +1,5 @@
+# Upstream's root .gitignore excludes `librechat.yaml` with an unanchored
+# pattern, so it matches at any depth and would silently drop this deployment's
+# config from the repo. Re-include it here rather than editing the upstream
+# file, so `git merge upstream/main` stays clean.
+!librechat.yaml

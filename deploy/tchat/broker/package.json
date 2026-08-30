@@ -1,0 +1,13 @@
+{
+  "name": "tchat-gateway-broker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Resolves a Tchat chat user to their TensorGrid Models Gateway token and relays inference to api.tensorgrid.space.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {}
+}

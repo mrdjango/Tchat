@@ -1,0 +1,126 @@
+# Tchat — LibreChat configuration for chat.tensorgrid.space
+#
+# Bind-mounted to /app/librechat.yaml. The upstream repo gitignores
+# `librechat.yaml`, so the real config lives here under deploy/tchat/ where
+# `git merge upstream/main` will never touch it.
+#
+# Every model call leaves through the Tchat broker, which swaps the shared
+# ingress key for the signed-in user's own Models Gateway token before
+# forwarding to api.tensorgrid.space. Users never see that token and cannot
+# point Tchat at any other provider.
+
+version: 1.3.14
+cache: true
+
+interface:
+  customWelcome: 'Welcome to Tchat — TensorGrid models, billed to your TensorGrid credit.'
+  privacyPolicy:
+    externalUrl: 'https://tensorgrid.space/privacy'
+    openNewTab: true
+  termsOfService:
+    externalUrl: 'https://tensorgrid.space/terms'
+    openNewTab: true
+  modelSelect: true
+  parameters: true
+  presets: true
+  bookmarks: true
+  multiConvo: true
+  fileSearch: true
+  fileCitations: true
+  feedback: true
+  prompts:
+    use: true
+    create: true
+    share: false
+    public: false
+  agents:
+    use: true
+    create: true
+    share: false
+    public: false
+  # No third-party agent marketplace: everything Tchat can reach must route
+  # through the TensorGrid endpoints below.
+  marketplace:
+    use: false
+
+registration:
+  # OpenID is the only social provider Tchat will ever accept, and it points at
+  # TensorGrid. Until the Django IdP exists this list is inert because
+  # ALLOW_SOCIAL_LOGIN is false — see deploy/tchat/OIDC.md.
+  socialLogins: ['openid']
+
+endpoints:
+  # Only these two exist. Built-in providers are additionally switched off with
+  # `ENDPOINTS=agents`, and no provider API key is ever present in the
+  # environment, so there is nothing for a user to select or configure.
+  custom:
+    - name: 'TensorGrid'
+      apiKey: '${TCHAT_BROKER_SHARED_KEY}'
+      baseURL: '${TCHAT_BROKER_BASE_URL}'
+      # Resolved per request from the signed-in LibreChat user. The broker
+      # trades these for that user's Gateway token; it refuses the request
+      # outright when they are absent.
+      headers:
+        X-Tchat-User-Id: '{{LIBRECHAT_USER_ID}}'
+        X-Tchat-User-Email: '{{LIBRECHAT_USER_EMAIL}}'
+        X-Tchat-User-Openid: '{{LIBRECHAT_USER_OPENIDID}}'
+      models:
+        # Live from the Gateway catalog via /v1/models through the broker, so
+        # adding a model in the Gateway admin publishes it here with no redeploy.
+        fetch: true
+        # Fallback shown before the first successful fetch. Keep in step with
+        # the Gateway catalog.
+        default:
+          - 'gpt-4o-mini'
+      titleConvo: true
+      titleModel: 'current_model'
+      modelDisplayLabel: 'TensorGrid'
+      iconURL: '/images/tchat-mark.svg'
+
+    - name: 'TensorGrid-Claude'
+      # Native Anthropic /v1/messages against the Gateway's Claude-compatible
+      # relay. The Anthropic client authenticates with x-api-key, which the
+      # broker accepts alongside bearer tokens.
+      provider: 'anthropic'
+      apiKey: '${TCHAT_BROKER_SHARED_KEY}'
+      baseURL: '${TCHAT_BROKER_BASE_URL}'
+      headers:
+        anthropic-version: '2023-06-01'
+        X-Tchat-User-Id: '{{LIBRECHAT_USER_ID}}'
+        X-Tchat-User-Email: '{{LIBRECHAT_USER_EMAIL}}'
+        X-Tchat-User-Openid: '{{LIBRECHAT_USER_OPENIDID}}'
+      models:
+        # The Anthropic provider has no /models convention to auto-fetch, so
+        # these are listed explicitly and must exist in the Gateway catalog.
+        fetch: false
+        default:
+          - 'claude-opus-5'
+          - 'claude-sonnet-5'
+          - 'claude-haiku-4-5-20251001'
+      titleConvo: true
+      titleModel: 'claude-haiku-4-5-20251001'
+      modelDisplayLabel: 'TensorGrid Claude'
+      iconURL: '/images/tchat-mark.svg'
+
+# `enforce: true` is what actually locks the product down: the user's choice is
+# limited to this list, and a stored preset naming any other endpoint is
+# ignored rather than honoured.
+modelSpecs:
+  enforce: true
+  prioritize: true
+  addedEndpoints: []
+  list:
+    - name: 'tensorgrid-default'
+      label: 'TensorGrid'
+      description: 'General-purpose chat on TensorGrid models, billed to your TensorGrid credit.'
+      default: true
+      preset:
+        endpoint: 'TensorGrid'
+        model: 'gpt-4o-mini'
+
+    - name: 'tensorgrid-claude'
+      label: 'TensorGrid Claude'
+      description: 'Anthropic Claude models served through the TensorGrid gateway.'
+      preset:
+        endpoint: 'TensorGrid-Claude'
+        model: 'claude-sonnet-5'
