@@ -70,7 +70,9 @@ export const createApp = ({ config, cache, fetchImpl = fetch, logger = console }
     const url = new URL(request.url, 'http://broker.internal');
 
     if (url.pathname === '/healthz') {
-      return new Response('OK', { status: 200 });
+      // Lowercase, matching the /healthz convention used by tchat-proxy and
+      // every TensorGrid stack service (readyz-style endpoints stay uppercase).
+      return new Response('ok', { status: 200 });
     }
 
     try {
