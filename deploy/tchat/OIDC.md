@@ -120,9 +120,25 @@ first sign-in. `librechat.yaml` already carries
 1. Deploy with `ALLOW_EMAIL_LOGIN=true` still set and confirm a real user can
    sign in through TensorGrid and send a message.
 2. Then set `ALLOW_EMAIL_LOGIN=false` and `OPENID_AUTO_REDIRECT=true`, making
-   TensorGrid the only way in.
+   TensorGrid the only way in — **including from Tchat-Mobile: verify the mobile client signs in
+   successfully under `ALLOW_EMAIL_LOGIN=false` before removing the break-glass admin.** A mobile
+   OIDC failure is silent from the web side, so step 1 passing there is not evidence step 2 is safe.
 
 Keep one break-glass local admin until step 2 has held.
+
+## Mobile clients
+
+Tchat-Mobile (the native Android/iOS client, `TensorGrid-stacks/Tchat-Mobile`) uses this same
+flow — no second OIDC client and no extra redirect URI are needed. Its OAuth launch and the
+callback both end at `https://chat.tensorgrid.space`, exactly like the web client, so the single
+redirect URI registered in step 2 above covers both. `OPENID_USE_PKCE=false` is fine for it too,
+for the same reason it's fine for web: the authorization code never leaves the server:
+`oauthHandler` exchanges it for tokens server-side before ever redirecting back to the client.
+
+As of this writing the mobile client's OAuth flow itself is still being hardened — see
+`Tchat-Mobile/TCHAT.md`'s "OIDC: known-fragile" section before flipping
+`ALLOW_EMAIL_LOGIN=false` in production. `NON_BROWSER_VIOLATION_SCORE=0` (in `env.example`) is a
+separate, already-required prerequisite for the mobile client generally, not specific to OIDC.
 
 ## Notes
 
