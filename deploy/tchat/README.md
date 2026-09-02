@@ -57,8 +57,10 @@ Three independent locks, so no single misconfiguration opens the door:
 
 - `ENDPOINTS=agents` removes every built-in provider from the endpoint menu.
 - No provider API key exists anywhere in the environment.
-- `modelSpecs.enforce: true` in `librechat.yaml` limits the user to the listed
-  specs and ignores stored presets naming anything else.
+- Exactly two `custom` endpoints exist in `librechat.yaml`, both aimed at the broker's own
+  base URL — there is nothing else to select. (`modelSpecs.enforce` is deliberately `false`:
+  turning it on would additionally freeze the model list, which would stop users choosing from
+  the Gateway catalog they are paying for. See the comment above `modelSpecs:` in `librechat.yaml`.)
 
 The broker is the backstop: it only relays `/v1/chat/completions`,
 `/v1/messages`, `/v1/models`, `/v1/embeddings`, and only to
