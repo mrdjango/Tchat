@@ -352,6 +352,25 @@ describe('RedisJobStore', () => {
       preserveForScheduleReconcile: true,
       promptTokens: 0,
       discoveredTools: [],
+      contextMeta: {
+        calibrationRatio: 1.25,
+        encoding: 'claude',
+        fading: { v: 1, budgetTokens: 50_000, masked: true },
+        fadingTiers: [{ agentId: 'agent-123', v: 1, budgetTokens: 50_000, masked: true }],
+      },
+      compactionSemanticIndex: {
+        version: 1,
+        entries: [
+          {
+            type: 'activity_phase',
+            sourceMessageId: 'assistant-history',
+            sourceContentIndex: 1,
+            revision: 1,
+            status: 'committed',
+            text: 'Verified the release state',
+          },
+        ],
+      },
       preemptCapable: true,
       steerQuotesExecutionId: 'exec-1',
       generationProtocolVersion: 2,
@@ -425,6 +444,21 @@ describe('RedisJobStore', () => {
       preserveForScheduleReconcile: true,
       promptTokens: 0,
       discoveredTools: [],
+      contextMeta: {
+        calibrationRatio: 1.25,
+        encoding: 'claude',
+        fading: { v: 1, budgetTokens: 50_000, masked: true },
+        fadingTiers: [{ agentId: 'agent-123', v: 1, budgetTokens: 50_000, masked: true }],
+      },
+      compactionSemanticIndex: {
+        version: 1,
+        entries: [
+          expect.objectContaining({
+            type: 'activity_phase',
+            text: 'Verified the release state',
+          }),
+        ],
+      },
       resolvedAskUserQuestions: [
         {
           request: { question: 'Deploy where?' },

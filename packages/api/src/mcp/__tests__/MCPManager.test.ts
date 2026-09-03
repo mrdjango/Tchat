@@ -819,6 +819,99 @@ describe('MCPManager', () => {
     });
   });
 
+  describe('callTool - cancellation logging', () => {
+    const mockUser = { id: 'cancel-user' } as IUser;
+    const mockFlowManager = {} as Parameters<MCPManager['callTool']>[0]['flowManager'];
+    const serverConfig: t.SSEOptions = {
+      type: 'sse',
+      url: 'https://api.example.com',
+    };
+
+    /** Rejects the way the MCP SDK does once a request's signal aborts. */
+    function createAbortingConnection(): MCPConnection {
+      return {
+        isConnected: jest.fn().mockResolvedValue(true),
+        setRequestHeaders: jest.fn(),
+        timeout: 30000,
+        client: {
+          request: jest.fn(
+            (_request: unknown, _schema: unknown, options: { signal?: AbortSignal }) =>
+              new Promise((_resolve, reject) => {
+                options.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+                  once: true,
+                });
+              }),
+          ),
+        },
+      } as unknown as MCPConnection;
+    }
+
+    beforeEach(() => {
+      (graphUtils.preProcessGraphTokens as jest.Mock).mockImplementation(
+        async (options) => options,
+      );
+      (logger.error as jest.Mock).mockClear();
+      (logger.debug as jest.Mock).mockClear();
+    });
+
+    async function callAndAbort(connection: MCPConnection): Promise<unknown> {
+      const manager = new MCPManager();
+      jest.spyOn(manager, 'getConnection').mockResolvedValue(connection);
+      const controller = new AbortController();
+      const call = manager.callTool({
+        user: mockUser,
+        serverName,
+        serverConfig,
+        toolName: 'test_tool',
+        provider: 'openai',
+        flowManager: mockFlowManager,
+        options: { signal: controller.signal },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      controller.abort();
+      return call.catch((error) => error);
+    }
+
+    it('logs a user-aborted tool call at debug rather than as a failure', async () => {
+      await callAndAbort(createAbortingConnection());
+
+      expect(logger.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('Tool call failed'),
+        expect.anything(),
+      );
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Tool call cancelled by user abort'),
+      );
+    });
+
+    it('keeps a real failure racing the Stop at error level', async () => {
+      const connection = {
+        isConnected: jest.fn().mockResolvedValue(true),
+        setRequestHeaders: jest.fn(),
+        timeout: 30000,
+        client: {
+          request: jest.fn(
+            (_request: unknown, _schema: unknown, options: { signal?: AbortSignal }) =>
+              new Promise((_resolve, reject) => {
+                options.signal?.addEventListener(
+                  'abort',
+                  () => reject(new Error('upstream 503 from the MCP server')),
+                  { once: true },
+                );
+              }),
+          ),
+        },
+      } as unknown as MCPConnection;
+
+      await callAndAbort(connection);
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Tool call failed'),
+        expect.anything(),
+      );
+    });
+  });
+
   describe('callTool - Graph Token Integration', () => {
     const mockUser: Partial<IUser> = {
       id: 'user-123',
@@ -2957,6 +3050,110 @@ describe('MCPManager', () => {
       expect(MCPConnectionFactory.discoverTools).not.toHaveBeenCalled();
     });
 
+    it('gives a budgeted caller an abort signal for the app-connection probe and snapshot', async () => {
+      mockAppConnections({
+        get: jest.fn().mockResolvedValue(mockConnection),
+      });
+      const deadlineMs = Date.now() + 3000;
+
+      const manager = await MCPManager.createInstance(newMCPServersConfig());
+      const result = await manager.discoverServerTools({ serverName, deadlineMs });
+
+      expect(result.tools).toEqual(mockTools);
+      expect(mockConnection.isConnected).toHaveBeenCalledWith(expect.any(AbortSignal));
+      expect(mockConnection.fetchOrderedToolsSnapshot).toHaveBeenCalledWith(
+        deadlineMs,
+        expect.any(AbortSignal),
+      );
+    });
+
+    it('lets the caller signal cancel app-connection work even without a deadline', async () => {
+      mockAppConnections({
+        get: jest.fn().mockResolvedValue(mockConnection),
+      });
+      const controller = new AbortController();
+
+      const manager = await MCPManager.createInstance(newMCPServersConfig());
+      await manager.discoverServerTools({ serverName, signal: controller.signal });
+
+      expect(mockConnection.isConnected).toHaveBeenCalledWith(controller.signal);
+      expect(mockConnection.fetchOrderedToolsSnapshot).toHaveBeenCalledWith(
+        undefined,
+        controller.signal,
+      );
+    });
+
+    it('does not start discovery fallback for a caller whose signal already aborted', async () => {
+      const isConnected = jest.fn().mockResolvedValue(false);
+      mockAppConnections({
+        get: jest.fn().mockResolvedValue({ ...mockConnection, isConnected }),
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      const manager = await MCPManager.createInstance(newMCPServersConfig());
+      const result = await manager.discoverServerTools({ serverName, signal: controller.signal });
+
+      expect(result.tools).toBeNull();
+      expect(MCPConnectionFactory.discoverTools).not.toHaveBeenCalled();
+    });
+
+    it('forwards the caller signal into non-OAuth fallback discovery', async () => {
+      mockAppConnections({
+        get: jest.fn().mockResolvedValue(null),
+      });
+      (MCPConnectionFactory.discoverTools as jest.Mock).mockResolvedValue({
+        tools: mockTools,
+        connection: null,
+        oauthRequired: false,
+        oauthUrl: null,
+      });
+      const controller = new AbortController();
+
+      const manager = await MCPManager.createInstance(newMCPServersConfig());
+      await manager.discoverServerTools({ serverName, signal: controller.signal });
+
+      expect(MCPConnectionFactory.discoverTools).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
+    it('does not reuse an app connection for a tenant-scoped config override', async () => {
+      const configOverride = {
+        type: 'streamable-http' as const,
+        url: 'https://tenant.example.com/mcp',
+        source: 'config' as const,
+      };
+      const appConnections = { get: jest.fn().mockResolvedValue(mockConnection) };
+      mockAppConnections(appConnections);
+      (mockRegistryInstance.getServerConfig as jest.Mock).mockResolvedValue(configOverride);
+      (mockRegistryInstance.isAppServerConfig as jest.Mock).mockResolvedValue(false);
+      (MCPConnectionFactory.discoverTools as jest.Mock).mockResolvedValue({
+        tools: mockTools,
+        connection: null,
+        oauthRequired: false,
+        oauthUrl: null,
+      });
+
+      const manager = await MCPManager.createInstance(newMCPServersConfig());
+      const result = await manager.discoverServerTools({
+        serverName,
+        user: { id: 'tenant-user' } as IUser,
+        configServers: { [serverName]: configOverride },
+      });
+
+      expect(result.tools).toEqual(mockTools);
+      expect(mockRegistryInstance.getServerConfig).toHaveBeenCalledWith(serverName, 'tenant-user', {
+        [serverName]: configOverride,
+      });
+      expect(appConnections.get).not.toHaveBeenCalled();
+      expect(MCPConnectionFactory.discoverTools).toHaveBeenCalledWith(
+        expect.objectContaining({ serverConfig: configOverride }),
+        expect.objectContaining({ user: expect.objectContaining({ id: 'tenant-user' }) }),
+      );
+    });
+
     it('should use MCPConnectionFactory.discoverTools when no app connection available', async () => {
       const discoveryConnection = {
         disconnect: jest.fn().mockResolvedValue(undefined),
@@ -3774,13 +3971,27 @@ describe('MCPManager', () => {
         )?.[1];
         const tools: t.MCPTool[] = [{ name: 'current', inputSchema: { type: 'object' } }];
         listener(tools);
-        const snapshot = await manager.getServerToolFunctionsSnapshot(userId, serverName);
+        const deadlineMs = Date.now() + 3000;
+        const snapshot = await manager.getServerToolFunctionsSnapshot(
+          userId,
+          serverName,
+          undefined,
+          {
+            deadlineMs,
+          },
+        );
 
         expect(generationSpy).toHaveBeenCalledWith({ userId, serverName });
         expect(snapshot).toEqual({
           tools: expectedToolFunctions,
           publicationGeneration: 'generation-a',
         });
+        expect(MCPServerInspector.getToolCatalog).toHaveBeenCalledWith(
+          serverName,
+          mockConnection,
+          deadlineMs,
+          expect.any(AbortSignal),
+        );
         expect(notifySpy).toHaveBeenCalledWith({
           tools,
           userId,

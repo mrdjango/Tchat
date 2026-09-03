@@ -1,5 +1,6 @@
 import type { TSubagentThreadLineage } from 'librechat-data-provider';
 import type { Document, Types } from 'mongoose';
+import type { ICompactionSemanticIndexProjection } from './compaction';
 
 export const MAX_AGENT_EVENT_ACTOR_SKILLS = 64;
 export const MAX_AGENT_EVENT_ACTOR_DISCOVERED_TOOLS = 128;
@@ -44,9 +45,37 @@ export interface IAgentEventActorSummary {
   tokenCount: number;
 }
 
+/**
+ * Latched context-fading tier from `@librechat/agents`. Every cap the SDK
+ * applies to its provider-only projection of historical tool results derives
+ * from it alone, so persisting it keeps that projection byte-stable across runs
+ * for prefix-based provider prompt caches. Graph messages stay canonical.
+ */
+export interface IAgentFadingTier {
+  v: 1;
+  /** Token budget the caps derive from; never grows within a conversation. */
+  budgetTokens: number;
+  /** Whether observation masking has activated. */
+  masked: boolean;
+}
+
+/** One agent's latched tier inside the persisted per-agent map. */
+export interface IAgentFadingTierEntry extends IAgentFadingTier {
+  agentId: string;
+}
+
+/**
+ * Compact context state a run hands to its successor: calibration and the
+ * latched fading tiers. Messages themselves are never part of it; the SDK keeps
+ * graph history canonical and derives a provider-only projection per run.
+ */
 export interface IAgentEventActorContextMeta {
   calibrationRatio: number;
   encoding?: string;
+  /** Default agent's tier, kept for single-agent seeding. */
+  fading?: IAgentFadingTier;
+  /** Tiers keyed by agent ID, stored as entries so agent IDs never become field names. */
+  fadingTiers?: IAgentFadingTierEntry[];
 }
 
 /** Private committed checkpoint state for one event-bound child actor. */
@@ -62,6 +91,8 @@ export interface IAgentEventActorState {
   summary?: IAgentEventActorSummary;
   /** Pruner calibration carried by ordinary turns on the parent response message. */
   contextMeta?: IAgentEventActorContextMeta;
+  /** Bounded advisory guidance replayed without reading durable message history. */
+  compactionSemanticIndex?: ICompactionSemanticIndexProjection;
   previousCheckpoint?: IAgentEventActorCheckpoint;
   /** Forces the next qualifying event to rebuild from durable message history. */
   requiresColdStart?: boolean;
