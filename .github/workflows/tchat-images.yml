@@ -52,6 +52,7 @@ jobs:
           MEILI_MASTER_KEY: ci-placeholder
           TCHAT_VECTOR_USER: ci
           TCHAT_VECTOR_PASSWORD: ci
+          ADMIN_PANEL_SESSION_SECRET: ci-placeholder
         run: docker compose -f compose.production.yml config --quiet
 
   publish:
