@@ -9,6 +9,7 @@ const {
   logAxiosError,
   oaiToolkit,
   extractBaseURL,
+  brokerUserHeaders,
   getProxyDispatcher,
   applyAxiosProxyConfig,
 } = require('@librechat/api');
@@ -104,6 +105,13 @@ function createOpenAIImageTools(fields = {}) {
       'Content-Type': 'application/json',
     };
     closureConfig.apiKey = process.env.IMAGE_GEN_OAI_API_KEY;
+  }
+
+  /** Empty unless `baseURL` is the Tchat broker, which bills the image to this
+   *  user's own Gateway token and refuses a request it cannot attribute. */
+  const identityHeaders = brokerUserHeaders(req, baseURL);
+  if (Object.keys(identityHeaders).length > 0) {
+    closureConfig.defaultHeaders = { ...closureConfig.defaultHeaders, ...identityHeaders };
   }
 
   const imageFiles = fields.imageFiles ?? [];
@@ -325,6 +333,7 @@ Error Message: ${error.message}`);
       /** @type {import('axios').RawAxiosHeaders} */
       let headers = {
         ...formData.getHeaders(),
+        ...identityHeaders,
       };
 
       if (process.env.IMAGE_GEN_OAI_AZURE_API_VERSION && process.env.IMAGE_GEN_OAI_BASEURL) {

@@ -63,8 +63,17 @@ Three independent locks, so no single misconfiguration opens the door:
   the Gateway catalog they are paying for. See the comment above `modelSpecs:` in `librechat.yaml`.)
 
 The broker is the backstop: it only relays `/v1/chat/completions`,
-`/v1/messages`, `/v1/models`, `/v1/embeddings`, and only to
-`TENSORGRID_API_BASE_URL`.
+`/v1/messages`, `/v1/models`, `/v1/embeddings`, `/v1/images/generations`,
+`/v1/images/edits`, and only to `TENSORGRID_API_BASE_URL`.
+
+The two image paths serve the `image_gen_oai` agent toolkit. A chat completion
+gets its `X-Tchat-User-*` headers from the `headers:` block of the `custom`
+endpoint in `librechat.yaml`; an agent tool never passes through that block, so
+the tool attaches them itself (`brokerUserHeaders` in `packages/api/src/broker`)
+whenever `IMAGE_GEN_OAI_BASEURL` shares an origin with `TCHAT_BROKER_BASE_URL`.
+Point it anywhere else and the headers are withheld — the user's email is never
+sent to a third-party provider — and the broker refuses the call as
+`identity_missing`.
 
 ## Files
 

@@ -26,30 +26,48 @@ const config = {
 const silent = { error() {}, log() {} };
 
 const jsonOk = (body) =>
-  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 
 /** Stands in for Django + Gateway + the public inference API. */
 const makeFetch = (overrides = {}) => {
   const calls = [];
-  const state = { tokens: overrides.tokens ?? [], upstreamStatuses: overrides.upstreamStatuses ?? [200] };
+  const state = {
+    tokens: overrides.tokens ?? [],
+    upstreamStatuses: overrides.upstreamStatuses ?? [200],
+  };
   const impl = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : input.toString();
     calls.push({ url, init });
 
     if (url.endsWith('/api/internal/tchat/v1/subjects/resolve')) {
       if (overrides.subjectStatus === 404) {
-        return new Response(JSON.stringify({ success: false, code: 'account_not_found' }), { status: 404 });
+        return new Response(JSON.stringify({ success: false, code: 'account_not_found' }), {
+          status: 404,
+        });
       }
-      return jsonOk({ success: true, data: { subject_id: SUBJECT, status: overrides.subjectStatus ?? 'active' } });
+      return jsonOk({
+        success: true,
+        data: { subject_id: SUBJECT, status: overrides.subjectStatus ?? 'active' },
+      });
     }
     if (url.includes('/tokens?')) {
       return jsonOk({ success: true, data: { total: state.tokens.length, items: state.tokens } });
     }
     if (url.endsWith('/reveal')) {
-      return jsonOk({ success: true, data: { id: '43', name: 'TCHAT', key: 'sk-revealed-user-token' } });
+      return jsonOk({
+        success: true,
+        data: { id: '43', name: 'TCHAT', key: 'sk-revealed-user-token' },
+      });
     }
     if (url.endsWith(`/users/${SUBJECT}/tokens`)) {
-      return jsonOk({ success: true, created: true, data: { id: '44', name: 'TCHAT', key: 'sk-minted-user-token' } });
+      return jsonOk({
+        success: true,
+        created: true,
+        data: { id: '44', name: 'TCHAT', key: 'sk-minted-user-token' },
+      });
     }
     const status = state.upstreamStatuses.shift() ?? 200;
     return new Response(JSON.stringify({ ok: status === 200 }), { status });
@@ -101,9 +119,7 @@ test('a chat session with no TensorGrid identity is refused', async () => {
   const { impl, calls } = makeFetch();
   const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
 
-  const response = await app(
-    chatRequest({ 'X-Tchat-User-Email': '', 'X-Tchat-User-Openid': '' }),
-  );
+  const response = await app(chatRequest({ 'X-Tchat-User-Email': '', 'X-Tchat-User-Openid': '' }));
 
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error.code, 'identity_missing');
@@ -177,7 +193,9 @@ test('the resolved token is cached across requests', async () => {
   const afterFirst = calls.length;
   await app(chatRequest());
 
-  const secondRoundTrips = calls.slice(afterFirst).filter((entry) => !entry.url.includes('api.tensorgrid.space'));
+  const secondRoundTrips = calls
+    .slice(afterFirst)
+    .filter((entry) => !entry.url.includes('api.tensorgrid.space'));
   assert.deepEqual(secondRoundTrips, []);
 });
 
@@ -189,7 +207,9 @@ test('a 401 from the gateway refreshes the token once and retries', async () => 
   const response = await app(chatRequest());
 
   assert.equal(response.status, 200);
-  const upstreamCalls = calls.filter((entry) => entry.url.startsWith('https://api.tensorgrid.space'));
+  const upstreamCalls = calls.filter((entry) =>
+    entry.url.startsWith('https://api.tensorgrid.space'),
+  );
   assert.equal(upstreamCalls.length, 2);
 });
 
@@ -223,8 +243,85 @@ test('the broker refuses to relay paths outside the inference surface', async ()
   assert.equal(calls.length, 0);
 });
 
+test("image generation relays on the signed-in user's own Gateway token", async () => {
+  const { impl, calls } = makeFetch({ tokens: [{ id: '43', name: 'TCHAT' }] });
+  const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
+
+  const response = await app(
+    new Request('http://broker.internal/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.sharedKey}`,
+        'X-Tchat-User-Email': 'chat-user@example.com',
+      },
+      body: JSON.stringify({ model: 'gpt-image-1', prompt: 'a teal grid' }),
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  const upstream = calls.at(-1);
+  assert.equal(upstream.url, 'https://api.tensorgrid.space/v1/images/generations');
+  // The shared ingress key never leaves the broker; the user's token pays.
+  assert.equal(upstream.init.headers.get('authorization'), 'Bearer sk-revealed-user-token');
+  assert.equal(JSON.parse(upstream.init.body).prompt, 'a teal grid');
+});
+
+test('image edits keep the multipart body and its boundary intact', async () => {
+  const { impl, calls } = makeFetch({ tokens: [{ id: '43', name: 'TCHAT' }] });
+  const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
+
+  const boundary = '----tchatBoundary123';
+  const body =
+    `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n` +
+    `make it teal\r\n--${boundary}--\r\n`;
+  const response = await app(
+    new Request('http://broker.internal/v1/images/edits', {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        Authorization: `Bearer ${config.sharedKey}`,
+        'X-Tchat-User-Email': 'chat-user@example.com',
+      },
+      body,
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  const upstream = calls.at(-1);
+  assert.equal(upstream.url, 'https://api.tensorgrid.space/v1/images/edits');
+  // A rewritten boundary makes the upload unparseable at the Gateway.
+  assert.equal(
+    upstream.init.headers.get('content-type'),
+    `multipart/form-data; boundary=${boundary}`,
+  );
+  assert.equal(Buffer.from(upstream.init.body).toString('utf8'), body);
+});
+
+test('an image request without an identity header is refused before any relay', async () => {
+  const { impl, calls } = makeFetch();
+  const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
+
+  const response = await app(
+    new Request('http://broker.internal/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.sharedKey}` },
+      body: JSON.stringify({ prompt: 'anonymous' }),
+    }),
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error.code, 'identity_missing');
+  assert.equal(calls.length, 0);
+});
+
 test('healthz needs no credentials and matches the stack-wide convention', async () => {
-  const app = createApp({ config, cache: createCache(), fetchImpl: makeFetch().impl, logger: silent });
+  const app = createApp({
+    config,
+    cache: createCache(),
+    fetchImpl: makeFetch().impl,
+    logger: silent,
+  });
 
   const response = await app(new Request('http://broker.internal/healthz'));
 
@@ -239,11 +336,19 @@ test('canonical JSON matches the Python serialization Django hashes', () => {
     canonicalJson({ b: 1, a: 'x', nested: { z: 1, y: 2 } }).toString(),
     '{"a":"x","b":1,"nested":{"y":2,"z":1}}',
   );
-  assert.equal(canonicalJson({ email: 'zoë@example.com' }).toString(), '{"email":"zo\\u00eb@example.com"}');
+  assert.equal(
+    canonicalJson({ email: 'zoë@example.com' }).toString(),
+    '{"email":"zo\\u00eb@example.com"}',
+  );
 });
 
 test('signed headers carry a fresh timestamp and the sha256= prefix', () => {
-  const headers = signedHeaders({ secret: config.tchatSecret, method: 'post', target: '/x', body: null });
+  const headers = signedHeaders({
+    secret: config.tchatSecret,
+    method: 'post',
+    target: '/x',
+    body: null,
+  });
 
   assert.match(headers['X-TensorGrid-Signature'], /^sha256=[0-9a-f]{64}$/);
   assert.ok(Math.abs(Date.now() / 1000 - Number(headers['X-TensorGrid-Timestamp'])) < 5);

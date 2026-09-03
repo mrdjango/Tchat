@@ -84,6 +84,8 @@ export * from './files';
 export * from './images';
 /* Storage */
 export * from './storage';
+/* Tchat broker */
+export * from './broker';
 /* Tools */
 export * from './tools';
 /* web search */

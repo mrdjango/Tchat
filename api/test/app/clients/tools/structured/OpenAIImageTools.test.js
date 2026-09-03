@@ -25,6 +25,7 @@ jest.mock('@librechat/api', () => ({
     },
   },
   extractBaseURL: jest.fn((url) => url),
+  brokerUserHeaders: jest.fn(() => ({})),
   getProxyDispatcher: jest.fn(() => undefined),
   applyAxiosProxyConfig: jest.fn(),
 }));

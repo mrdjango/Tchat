@@ -4,8 +4,17 @@ import { resolveSubject } from './identity.js';
 import { secretsMatch } from './signing.js';
 
 /** Paths the chat app is allowed to reach. Everything else is refused here
- *  rather than forwarded, so the broker can never be used as an open relay. */
-const RELAY_PREFIXES = ['/v1/chat/completions', '/v1/messages', '/v1/models', '/v1/embeddings'];
+ *  rather than forwarded, so the broker can never be used as an open relay.
+ *  The two image paths serve the `image_gen_oai` agent toolkit, whose edit
+ *  half posts multipart/form-data rather than JSON. */
+const RELAY_PREFIXES = [
+  '/v1/chat/completions',
+  '/v1/messages',
+  '/v1/models',
+  '/v1/embeddings',
+  '/v1/images/generations',
+  '/v1/images/edits',
+];
 
 /** Hop-by-hop and broker-private headers that must not reach the Gateway. */
 const STRIPPED = new Set([
@@ -95,9 +104,10 @@ export const createApp = ({ config, cache, fetchImpl = fetch, logger = console }
       const subject = await resolveSubject({ config, cache, fetchImpl, ...identity });
       // Buffered so a token refresh can replay it; chat payloads are small and
       // the streaming that matters is the response, which is piped through.
-      const bodyBytes = request.method === 'GET' || request.method === 'HEAD'
-        ? null
-        : Buffer.from(await request.arrayBuffer());
+      const bodyBytes =
+        request.method === 'GET' || request.method === 'HEAD'
+          ? null
+          : Buffer.from(await request.arrayBuffer());
 
       let token = await resolveToken({ config, cache, fetchImpl, subject });
       let response = await relay(request, url, token, bodyBytes);
