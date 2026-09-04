@@ -131,6 +131,41 @@ Guidelines:
   required: ['image_ids', 'prompt'],
 };
 
+/**
+ * Second binding of the same OpenAI-compatible image endpoint, aimed at a
+ * different model. The tool a user's agent carries -- not a request parameter
+ * or a shared env var -- decides which image model runs, so one agent can be
+ * "GPT Image" and another "Gemini Image" without either being able to reach the
+ * other's model. `IMAGE_GEN_GATEWAY_MODEL` names the model this pair uses.
+ */
+export const gatewayImageToolkit: {
+  readonly image_gen_gateway: {
+    readonly name: 'image_gen_gateway';
+    readonly description: string;
+    readonly schema: ExtendedJsonSchema;
+    readonly responseFormat: 'content_and_artifact';
+  };
+  readonly image_edit_gateway: {
+    readonly name: 'image_edit_gateway';
+    readonly description: string;
+    readonly schema: ExtendedJsonSchema;
+    readonly responseFormat: 'content_and_artifact';
+  };
+} = {
+  image_gen_gateway: {
+    name: 'image_gen_gateway' as const,
+    description: process.env.IMAGE_GEN_GATEWAY_DESCRIPTION || getImageGenDescription(),
+    schema: imageGenOaiJsonSchema,
+    responseFormat: 'content_and_artifact' as const,
+  } as const,
+  image_edit_gateway: {
+    name: 'image_edit_gateway' as const,
+    description: process.env.IMAGE_EDIT_GATEWAY_DESCRIPTION || getImageEditDescription(),
+    schema: imageEditOaiJsonSchema,
+    responseFormat: 'content_and_artifact' as const,
+  },
+} as const;
+
 export const oaiToolkit: {
   readonly image_gen_oai: {
     readonly name: 'image_gen_oai';

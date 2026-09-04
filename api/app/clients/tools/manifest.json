@@ -45,6 +45,20 @@
     ]
   },
   {
+    "name": "Gateway Image Tools",
+    "pluginKey": "image_gen_gateway",
+    "toolkit": true,
+    "description": "Image Generation and Editing on a second model served by the same OpenAI-compatible endpoint (set IMAGE_GEN_GATEWAY_MODEL)",
+    "icon": "assets/image_gen_oai.png",
+    "authConfig": [
+      {
+        "authField": "IMAGE_GEN_OAI_API_KEY",
+        "label": "OpenAI Image Tools API Key",
+        "description": "Your API key for the OpenAI-compatible image endpoint"
+      }
+    ]
+  },
+  {
     "name": "Wolfram",
     "pluginKey": "wolfram",
     "description": "Access computation, math, curated knowledge & real-time data through Wolfram|Alpha and Wolfram Language.",

@@ -57,6 +57,9 @@ function createAbortHandler() {
  * @param {string} fields.IMAGE_GEN_OAI_API_KEY - The OpenAI API key
  * @param {boolean} [fields.override] - Whether to override the API key check, necessary for app initialization
  * @param {MongoFile[]} [fields.imageFiles] - The images to be used for editing
+ * @param {string} [fields.imageModel] - Image model override; defaults to IMAGE_GEN_OAI_MODEL
+ * @param {object} [fields.genToolConfig] - Tool config (name/description/schema) for generation
+ * @param {object} [fields.editToolConfig] - Tool config (name/description/schema) for editing
  * @param {string} [fields.imageOutputType] - The image output type configuration
  * @param {string} [fields.fileStrategy] - The file storage strategy
  * @returns {Array<ReturnType<tool>>} - Array of image tools
@@ -83,7 +86,11 @@ function createOpenAIImageTools(fields = {}) {
   let apiKey = fields.IMAGE_GEN_OAI_API_KEY ?? getApiKey();
   const closureConfig = { apiKey };
 
-  const imageModel = process.env.IMAGE_GEN_OAI_MODEL || 'gpt-image-1';
+  /** A second binding of this endpoint (see `gatewayImageToolkit`) passes its
+   *  own model and tool configs, so two agents can carry two image models. */
+  const imageModel = fields.imageModel || process.env.IMAGE_GEN_OAI_MODEL || 'gpt-image-1';
+  const genToolConfig = fields.genToolConfig ?? oaiToolkit.image_gen_oai;
+  const editToolConfig = fields.editToolConfig ?? oaiToolkit.image_edit_oai;
 
   let baseURL = 'https://api.openai.com/v1/';
   if (!override && process.env.IMAGE_GEN_OAI_BASEURL) {
@@ -232,7 +239,7 @@ Error Message: ${error.message}`);
       ];
       return [response, { content, file_ids }];
     },
-    oaiToolkit.image_gen_oai,
+    genToolConfig,
   );
 
   /**
@@ -415,7 +422,7 @@ Error Message: ${error.message || 'Unknown error'}`);
         }
       }
     },
-    oaiToolkit.image_edit_oai,
+    editToolConfig,
   );
 
   return [imageGenTool, imageEditTool];
