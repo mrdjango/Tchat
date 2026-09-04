@@ -103,7 +103,6 @@ services:
       NO_PROXY: localhost,127.0.0.1,::1,tchat-mongo,tchat-meili,tchat-broker,tchat-rag,tchat-vectordb
       no_proxy: localhost,127.0.0.1,::1,tchat-mongo,tchat-meili,tchat-broker,tchat-rag,tchat-vectordb
     volumes:
-      - ./librechat.yaml:/app/librechat.yaml:ro
       - tchat_uploads:/app/uploads
       - tchat_images:/app/client/public/images
       - tchat_logs:/app/logs

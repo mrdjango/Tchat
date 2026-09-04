@@ -80,10 +80,10 @@ sent to a third-party provider — and the broker refuses the call as
 | Path | Purpose |
 | --- | --- |
 | `compose.production.yml` | The `tchat-production` stack. |
-| `librechat.yaml` | Endpoints, model specs, interface. Bind-mounted to `/app/librechat.yaml`. |
+| `librechat.yaml` | Endpoints, model specs, interface. Baked into `tchat-api` at `/app/librechat.yaml`. |
 | `nginx.conf` | Branding overrides + reverse proxy to `tchat-api`. |
 | `branding/` | Logo, favicons, PWA manifest served in place of LibreChat's. |
-| `Dockerfile.api` | Upstream LibreChat image + Doppler CLI. |
+| `Dockerfile.api` | This fork's LibreChat image + Doppler CLI + `librechat.yaml`. |
 | `broker/` | The gateway token broker (Node, no runtime dependencies). |
 | `entrypoint.sh` | Shared `doppler run` wrapper for both images. |
 | `env.example` | Every variable, and which system owns it. |
@@ -125,14 +125,23 @@ names and redeploy — no image rebuild, since `branding/` is bind-mounted.
 4. Verify: `curl -sS -o /dev/null -w '%{http_code}\n' https://chat.tensorgrid.space`
    returns 200, then sign in and send one message.
 
-`librechat.yaml`, `nginx.conf` and `branding/` are Komodo-tracked config files:
-editing them redeploys `tchat-api` / `tchat-proxy` without a new image.
+`librechat.yaml` ships inside the image, so it is released with the code that
+reads it — a spec field a new build expects can never meet an older config. The
+cost is that changing it means a build and a tag bump, like any code change.
+
+`nginx.conf` and `branding/` are still files in the Komodo run directory and
+still need to be updated there by hand; they are independent of app code, so a
+stale copy degrades branding rather than breaking a feature.
 
 ### Configuration-only change
 
-Change the value in Doppler (`doppler secrets set -p tchat-be-fe -c prd …`),
-then restart `tchat-api` (and `tchat-broker` if a broker variable changed).
-`doppler run` re-fetches on process start, so a restart is the whole procedure.
+Secrets and environment: change the value in Doppler
+(`doppler secrets set -p tchat-be-fe -c prd …`), then restart `tchat-api` (and
+`tchat-broker` if a broker variable changed). `doppler run` re-fetches on
+process start, so a restart is the whole procedure.
+
+`librechat.yaml` is not in that category any more: it is part of the image, so
+editing it follows the routine release above.
 
 ### Adopting an upstream LibreChat release
 

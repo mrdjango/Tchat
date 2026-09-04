@@ -22,6 +22,13 @@ RUN apk add --no-cache curl gnupg \
     && doppler --version
 COPY entrypoint.sh /usr/local/bin/tchat-entrypoint
 RUN chmod 0755 /usr/local/bin/tchat-entrypoint
+
+# Baked rather than bind-mounted, so the config a release runs is the config
+# that release was built from. The host copy under the Komodo run directory is
+# written once at stack setup and never refreshed, so a mounted file silently
+# pins itself to whatever was there on setup day -- which is how a build
+# expecting `modelSpecs.imageList` came up against a config without it.
+COPY librechat.yaml /app/librechat.yaml
 USER node
 
 # Doppler injects the tchat-be-fe config into the process environment and execs
