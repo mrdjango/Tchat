@@ -128,9 +128,9 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   );
 
   const handleImageGenToggle = useCallback(() => {
-    /** Off, or on with the entry the user last picked (`true` = admin default). */
-    const nextValue = imageGen?.toggleState ? false : (imageGen?.toggleState ?? true);
-    imageGen?.debouncedChange({ value: nextValue === false ? false : (nextValue ?? true) });
+    /** Turning it on selects the admin default (`true`); the submenu, which only
+     *  opens once it is on, switches models from there. */
+    imageGen?.debouncedChange({ value: imageGen?.toggleState ? false : true });
   }, [imageGen]);
 
   const handleSelectImageSpec = useCallback(
