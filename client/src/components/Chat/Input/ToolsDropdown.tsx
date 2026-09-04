@@ -1,15 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon } from '@librechat/client';
-import {
-  Brain,
-  Globe,
-  ImageIcon,
-  ScrollText,
-  Settings,
-  Settings2,
-  TerminalSquareIcon,
-} from 'lucide-react';
+import { Brain, Globe, ScrollText, Settings, Settings2, TerminalSquareIcon } from 'lucide-react';
 import {
   AuthType,
   Permissions,
@@ -27,6 +19,7 @@ import {
   useAgentCapabilities,
 } from '~/hooks';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
+import ImageGenSubMenu from '~/components/Chat/Input/ImageGenSubMenu';
 import MCPSubMenu from '~/components/Chat/Input/MCPSubMenu';
 import { useGetStartupConfig } from '~/data-provider';
 import { useBadgeRowContext } from '~/Providers';
@@ -129,10 +122,23 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     codeInterpreter?.debouncedChange({ value: newValue });
   }, [codeInterpreter]);
 
+  const imageSpecs = useMemo(
+    () => startupConfig?.modelSpecs?.imageList ?? [],
+    [startupConfig?.modelSpecs?.imageList],
+  );
+
   const handleImageGenToggle = useCallback(() => {
-    const newValue = !imageGen?.toggleState;
-    imageGen?.debouncedChange({ value: newValue });
+    /** Off, or on with the entry the user last picked (`true` = admin default). */
+    const nextValue = imageGen?.toggleState ? false : (imageGen?.toggleState ?? true);
+    imageGen?.debouncedChange({ value: nextValue === false ? false : (nextValue ?? true) });
   }, [imageGen]);
+
+  const handleSelectImageSpec = useCallback(
+    (name: string) => {
+      imageGen?.debouncedChange({ value: name });
+    },
+    [imageGen],
+  );
 
   const handleFileSearchToggle = useCallback(() => {
     const newValue = !fileSearch?.toggleState;
@@ -214,32 +220,18 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
 
   if (imageGenAvailable) {
     dropdownItems.push({
-      onClick: handleImageGenToggle,
+      onClick: () => {},
       hideOnClick: false,
       render: (props) => (
-        <div {...props}>
-          <div className="flex items-center gap-2">
-            <ImageIcon className="icon-md" />
-            <span>{localize('com_ui_image_gen')}</span>
-          </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsImageGenPinned?.(!isImageGenPinned);
-            }}
-            className={cn(
-              'rounded p-1 transition-all duration-200',
-              'hover:bg-surface-secondary hover:shadow-sm',
-              !isImageGenPinned && 'text-text-secondary hover:text-text-primary',
-            )}
-            aria-label={isImageGenPinned ? 'Unpin' : 'Pin'}
-          >
-            <div className="h-4 w-4">
-              <PinIcon unpin={isImageGenPinned} />
-            </div>
-          </button>
-        </div>
+        <ImageGenSubMenu
+          {...props}
+          isImageGenPinned={isImageGenPinned ?? false}
+          setIsImageGenPinned={setIsImageGenPinned ?? (() => {})}
+          imageGenSelection={imageGen?.toggleState}
+          imageSpecs={imageSpecs}
+          handleImageGenToggle={handleImageGenToggle}
+          handleSelectImageSpec={handleSelectImageSpec}
+        />
       ),
     });
   }

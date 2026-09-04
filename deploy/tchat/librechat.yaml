@@ -154,3 +154,36 @@ modelSpecs:
       preset:
         endpoint: 'TensorGrid-Claude'
         model: 'claude-sonnet-5'
+
+  # Image models offered behind the chat input's Image Gen toggle. Deliberately
+  # not in `list` above: those are chat models and populate the model selector,
+  # and a spec hidden from that menu never reaches the client at all. Adding a
+  # model the Gateway already serves is three lines here — no image rebuild,
+  # since this file is Komodo-tracked.
+  #
+  # `protocol: gemini` routes through the tool that speaks Google's own API,
+  # which the Gateway relays natively. It is required for `gemini-*-image`
+  # models: the Gateway's OpenAI image endpoint serves the `imagen` family only.
+  imageList:
+    - name: 'gpt-image'
+      label: 'GPT Image'
+      description: "OpenAI's image model. Generation and editing."
+      model: 'gpt-image-2'
+      default: true
+
+    - name: 'gpt-image-4k'
+      label: 'GPT Image 4K'
+      description: 'Higher-resolution output from the same OpenAI model family.'
+      model: 'gpt-image-2-4k'
+
+    - name: 'gemini-image'
+      label: 'Gemini Image'
+      description: "Google's Gemini 3 Pro image model."
+      model: 'gemini-3-pro-image-c'
+      protocol: 'gemini'
+
+    - name: 'gemini-image-flash'
+      label: 'Gemini Image Flash'
+      description: 'Faster, cheaper Gemini image model.'
+      model: 'gemini-3.1-flash-image-c'
+      protocol: 'gemini'

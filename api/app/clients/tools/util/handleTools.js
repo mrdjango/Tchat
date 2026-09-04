@@ -14,6 +14,7 @@ const {
   buildInlineMemoryTool,
   getCodeApiAuthHeaders,
   buildImageToolContext,
+  resolveImageSpec,
   SET_MEMORY_TOOL_NAME,
   buildWebSearchContext,
   DELETE_MEMORY_TOOL_NAME,
@@ -217,6 +218,13 @@ const loadTools = async ({
     tavily_search_results_json: TavilySearchResults,
   };
 
+  /** The Image Gen picker's selection, resolved the same way the ephemeral
+   *  loader resolves it, so the tool generates with the model the user chose. */
+  const selectedImageModel = resolveImageSpec(
+    options.req?.body?.ephemeralAgent?.image_gen,
+    options.req?.config?.modelSpecs?.imageList,
+  )?.model;
+
   const customConstructors = {
     image_gen_oai: async (_toolContextMap, dynamicToolContextMap) => {
       const authFields = getAuthFields('image_gen_oai');
@@ -234,6 +242,7 @@ const loadTools = async ({
         ...authValues,
         isAgent: !!agent,
         req: options.req,
+        imageModel: selectedImageModel,
         imageOutputType,
         fileStrategy,
         imageFiles,
@@ -255,6 +264,7 @@ const loadTools = async ({
         ...authValues,
         isAgent: !!agent,
         req: options.req,
+        imageModel: selectedImageModel,
         imageFiles,
         userId: user,
         fileStrategy,

@@ -115,11 +115,14 @@ export type TEphemeralAgent = {
   /** Equip the ephemeral agent with the `ask_user_question` HITL tool. */
   ask_user_question?: boolean;
   /**
-   * Equip the ephemeral agent with the OpenAI image toolkit, so a plain chat
-   * can generate and edit images without the user building an agent first.
-   * `image_edit_oai` comes along through `toolkitExpansion`.
+   * Equip the ephemeral agent with an image toolkit, so a plain chat can
+   * generate and edit images without the user building an agent first.
+   *
+   * A string names an entry in `modelSpecs.imageList` (which image model, and
+   * therefore which tool). `true` means the default entry, which is also what
+   * conversations saved before the picker existed carry.
    */
-  image_gen?: boolean;
+  image_gen?: boolean | string;
   /**
    * Let the model dispatch this ephemeral agent's eligible tool calls in the
    * background (poll results via `check_background_task`). Requires the

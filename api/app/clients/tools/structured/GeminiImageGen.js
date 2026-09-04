@@ -345,7 +345,15 @@ function createGeminiImageTool(fields = {}) {
     throw new Error('This tool is only available for agents.');
   }
 
-  const { req, imageFiles = [], userId, fileStrategy, GEMINI_API_KEY, GOOGLE_KEY } = fields;
+  const {
+    req,
+    imageFiles = [],
+    userId,
+    fileStrategy,
+    imageModel,
+    GEMINI_API_KEY,
+    GOOGLE_KEY,
+  } = fields;
 
   const imageOutputType = fields.imageOutputType || EImageOutputType.PNG;
 
@@ -386,7 +394,7 @@ function createGeminiImageTool(fields = {}) {
       }
 
       let apiResponse;
-      const geminiModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+      const geminiModel = imageModel || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
       const config = {
         responseModalities: ['TEXT', 'IMAGE'],
       };

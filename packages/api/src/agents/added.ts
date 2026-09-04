@@ -8,7 +8,13 @@ import {
   appendAgentIdSuffix,
   encodeEphemeralAgentId,
 } from 'librechat-data-provider';
-import type { Agent, AgentToolOptions, TConversation, TModelSpec } from 'librechat-data-provider';
+import type {
+  Agent,
+  AgentToolOptions,
+  TConversation,
+  TImageSpec,
+  TModelSpec,
+} from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
 import type { ParsedServerConfig } from '~/mcp/types';
 import {
@@ -21,7 +27,7 @@ import { synthesizeBackgroundToolOptions } from '~/agents/background';
 import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
 import { getCustomEndpointConfig } from '~/app/config';
-import { oaiToolkit } from '~/tools/toolkits/oai';
+import { resolveImageSpec } from '~/images/specs';
 
 const { mcp_all, mcp_delimiter } = Constants;
 
@@ -139,7 +145,7 @@ export async function loadAddedAgent(
         ask_user_question?: boolean;
         run_in_background?: boolean;
         describe_intent?: boolean;
-        image_gen?: boolean;
+        image_gen?: boolean | string;
       }
     | undefined;
 
@@ -236,9 +242,13 @@ export async function loadAddedAgent(
   if (ephemeralAgent?.ask_user_question === true || modelSpec?.askUserQuestion === true) {
     tools.push(ASK_USER_QUESTION_TOOL_NAME);
   }
-  /** `toolkitExpansion` adds `image_edit_oai`, so one flag equips both halves. */
-  if (ephemeralAgent?.image_gen === true || modelSpec?.imageGen === true) {
-    tools.push(oaiToolkit.image_gen_oai.name);
+  /** Same resolution as the primary loader: the picked entry decides the tool. */
+  const imageSpec = resolveImageSpec(
+    ephemeralAgent?.image_gen ?? (modelSpec?.imageGen === true ? true : undefined),
+    (appConfig?.modelSpecs as { imageList?: TImageSpec[] } | undefined)?.imageList,
+  );
+  if (imageSpec) {
+    tools.push(imageSpec.toolName);
   }
 
   const addedServers = new Set<string>();

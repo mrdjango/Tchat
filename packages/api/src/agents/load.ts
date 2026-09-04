@@ -9,6 +9,7 @@ import {
 } from 'librechat-data-provider';
 import type {
   AgentModelParameters,
+  TImageSpec,
   AgentToolOptions,
   TEphemeralAgent,
   TModelSpec,
@@ -26,7 +27,7 @@ import { synthesizeBackgroundToolOptions } from '~/agents/background';
 import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
 import { getCustomEndpointConfig } from '~/app/config';
-import { oaiToolkit } from '~/tools/toolkits/oai';
+import { resolveImageSpec } from '~/images/specs';
 
 const { mcp_all, mcp_delimiter } = Constants;
 type ModelParametersWithPromptPrefix = AgentModelParameters & { promptPrefix?: string | null };
@@ -70,7 +71,9 @@ export async function loadEphemeralAgent(
   deps: LoadAgentDeps,
 ): Promise<Agent | null> {
   const { model, ...model_parameters } = _m ?? ({} as unknown as AgentModelParameters);
-  const modelSpecs = req.config?.modelSpecs as { list?: TModelSpec[] } | undefined;
+  const modelSpecs = req.config?.modelSpecs as
+    | { list?: TModelSpec[]; imageList?: TImageSpec[] }
+    | undefined;
   let modelSpec: TModelSpec | null = null;
   if (spec != null && spec !== '') {
     modelSpec = modelSpecs?.list?.find((s) => s.name === spec) ?? null;
@@ -118,9 +121,14 @@ export async function loadEphemeralAgent(
   if (ephemeralAgent?.ask_user_question === true || modelSpec?.askUserQuestion === true) {
     tools.push(ASK_USER_QUESTION_TOOL_NAME);
   }
-  /** `toolkitExpansion` adds `image_edit_oai`, so one flag equips both halves. */
-  if (ephemeralAgent?.image_gen === true || modelSpec?.imageGen === true) {
-    tools.push(oaiToolkit.image_gen_oai.name);
+  /** The selection names an entry in `modelSpecs.imageList`, which decides both
+   *  the tool and its model; `toolkitExpansion` adds the edit half. */
+  const imageSpec = resolveImageSpec(
+    ephemeralAgent?.image_gen ?? (modelSpec?.imageGen === true ? true : undefined),
+    modelSpecs?.imageList,
+  );
+  if (imageSpec) {
+    tools.push(imageSpec.toolName);
   }
 
   const addedServers = new Set<string>();

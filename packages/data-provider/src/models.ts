@@ -210,10 +210,40 @@ export const tModelSpecSchema = z.object({
   subagents: modelSpecSubagentsSchema.optional(),
 });
 
+/**
+ * An image model offered by the chat input's Image Gen picker.
+ *
+ * Kept out of `list` on purpose: those are chat models, they populate the model
+ * selector, and `excludeHiddenModelSpecs` drops anything marked
+ * `showInMenu: false` before the client ever sees it — so a hidden chat spec
+ * could not feed the picker either. A separate list keeps image models out of
+ * the chat selector without touching how chat specs are filtered.
+ */
+export const tImageSpecSchema = z.object({
+  name: z.string(),
+  label: z.string(),
+  /** Model id as the gateway publishes it, e.g. `gpt-image-2`. */
+  model: z.string(),
+  /**
+   * Which tool serves it. `openai` posts to /v1/images/*; `gemini` speaks
+   * Google's own protocol, which is the only way to reach `gemini-*-image`
+   * models on gateways whose image endpoint serves the `imagen` family alone.
+   */
+  protocol: z.enum(['openai', 'gemini']).default('openai'),
+  description: z.string().optional(),
+  iconURL: z.union([z.string(), eModelEndpointSchema]).optional(),
+  /** Used when the user has not chosen one. First entry wins if none is marked. */
+  default: z.boolean().optional(),
+});
+
+export type TImageSpec = z.infer<typeof tImageSpecSchema>;
+
 export const specsConfigSchema = z.object({
   enforce: z.boolean().default(false),
   prioritize: z.boolean().default(true),
   list: z.array(tModelSpecSchema).default([]),
+  /** Image models for the chat input's Image Gen picker. */
+  imageList: z.array(tImageSpecSchema).optional(),
   addedEndpoints: z.array(z.union([z.string(), eModelEndpointSchema])).optional(),
 });
 
