@@ -102,10 +102,12 @@ Runtime strings come from the environment instead: `APP_TITLE`,
 `CUSTOM_FOOTER` (which replaces the "LibreChat vX" footer entirely) and
 `HELP_AND_FAQ_URL`.
 
-**LibreChat core files changed: none.** The one thing this approach cannot
-reach is the loading-screen background colour and the structure of
-`client/index.html`, which are compiled in. Changing either would be the first
-real core edit and would need a fork-and-build instead of the upstream image.
+Branding stays config-only for a reason: an image rebuild is slower than
+editing a bind-mounted file, and these strings are exactly the kind of thing
+that changes without a release. Source edits are available now that the stack
+builds this fork (`tchat-librechat`), so the compiled-in items -- the
+loading-screen background colour and the structure of `client/index.html` --
+can be changed directly if branding ever needs to reach them.
 
 To swap the placeholder marks, drop new files into `branding/` under the same
 names and redeploy — no image rebuild, since `branding/` is bind-mounted.
@@ -114,8 +116,10 @@ names and redeploy — no image rebuild, since `branding/` is bind-mounted.
 
 ### Routine release
 
-1. Push to `main`; CI publishes `ghcr.io/mrdjango/tchat-api` and
-   `ghcr.io/mrdjango/tchat-broker` at the full commit SHA.
+1. Push to `main`; CI publishes `ghcr.io/mrdjango/tchat-librechat`,
+   `ghcr.io/mrdjango/tchat-api` and `ghcr.io/mrdjango/tchat-broker` at the full
+   commit SHA. `tchat-api` is built FROM `tchat-librechat` at that same SHA, so
+   the two never carry different source.
 2. Set `TCHAT_IMAGE_TAG` to that SHA in the Komodo stack environment.
 3. Deploy the `tchat-production` stack.
 4. Verify: `curl -sS -o /dev/null -w '%{http_code}\n' https://chat.tensorgrid.space`
@@ -137,13 +141,18 @@ git fetch upstream && git merge upstream/main
 ```
 
 Nothing under `deploy/tchat/` collides, because upstream does not use that
-path and gitignores `librechat.yaml` and `.env*`. Then:
+path and gitignores `librechat.yaml` and `.env*`. The merge itself is the
+upgrade -- `tchat-librechat` is built from this repository, so pushing the
+merge to `main` builds the new upstream code with the fork's changes on top.
+There is no `LIBRECHAT_TAG` to bump; it is overridden with the commit SHA.
+Then:
 
-1. Bump `LIBRECHAT_TAG` in `Dockerfile.api` to the release you want.
-2. Check the upstream changelog for changes to `interface`, `endpoints.custom`
+1. Check the upstream changelog for changes to `interface`, `endpoints.custom`
    or `modelSpecs` schema, and for renamed asset filenames — a renamed favicon
    or `logo.svg` would silently fall back to LibreChat branding, since the
    `location =` aliases in `nginx.conf` match exact paths.
+2. Expect a longer pipeline than a config-only change: the app image is a full
+   `npm ci` plus frontend build, not a wrapper layer.
 3. Deploy to the `dev` config first and walk the verification list below.
 
 ### Rollback

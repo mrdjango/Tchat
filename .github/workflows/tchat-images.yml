@@ -1,8 +1,15 @@
-# Publishes the two Tchat deployment images at the full commit SHA.
+# Publishes the three Tchat deployment images at the full commit SHA.
+#
+# tchat-librechat is this fork's own LibreChat build; tchat-api wraps it with the
+# Doppler entrypoint; tchat-broker is the gateway broker. All three come from
+# this repository, so a change anywhere in the app source reaches production.
 #
 # Immutable tags only: the Komodo stack pins an exact 40-character SHA, matching
 # the TensorGrid release contract. A moving tag would make a redeploy silently
 # change what runs.
+#
+# Doc-only edits under these paths rebuild too. Predictable beats clever, and
+# the layer cache makes a no-op rebuild cheap.
 name: Tchat images
 
 on:
@@ -11,6 +18,15 @@ on:
     paths:
       - 'deploy/tchat/**'
       - '.github/workflows/tchat-images.yml'
+      - 'api/**'
+      - 'client/**'
+      - 'packages/**'
+      - 'config/**'
+      - 'skill/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Dockerfile'
+      - '.dockerignore'
   workflow_dispatch:
 
 permissions:
@@ -55,16 +71,60 @@ jobs:
           ADMIN_PANEL_SESSION_SECRET: ci-placeholder
         run: docker compose -f compose.production.yml config --quiet
 
-  publish:
+  # This fork's LibreChat, built from the source in this repository. tchat-api
+  # is FROM this image, so it must exist at this SHA before that build starts.
+  librechat-image:
     needs: [broker-tests, config-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build metadata
+        id: meta
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: node
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/tchat-librechat:${{ github.sha }}
+          platforms: linux/amd64
+          provenance: false
+          # Surfaced in Settings -> About, which is how a running container
+          # answers "which commit is this?" during an incident.
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_BRANCH=${{ github.ref_name }}
+            BUILD_DATE=${{ steps.meta.outputs.date }}
+          cache-from: type=gha,scope=tchat-librechat
+          cache-to: type=gha,mode=max,scope=tchat-librechat
+
+  publish:
+    needs: [broker-tests, config-checks, librechat-image]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - image: tchat-api
             dockerfile: deploy/tchat/Dockerfile.api
+            build_args: |
+              LIBRECHAT_IMAGE=ghcr.io/${{ github.repository_owner }}/tchat-librechat
+              LIBRECHAT_TAG=${{ github.sha }}
           - image: tchat-broker
             dockerfile: deploy/tchat/broker/Dockerfile
+            build_args: ''
     steps:
       - uses: actions/checkout@v5
 
@@ -87,3 +147,4 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
           platforms: linux/amd64
           provenance: false
+          build-args: ${{ matrix.build_args }}

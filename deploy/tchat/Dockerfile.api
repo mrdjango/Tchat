@@ -1,10 +1,18 @@
 # Tchat API image.
 #
-# A thin wrapper over the upstream LibreChat image so that (a) no LibreChat
-# source is modified and upstream releases can be adopted by bumping one tag,
-# and (b) runtime secrets come from Doppler at process start instead of a .env
-# file on the host.
-ARG LIBRECHAT_IMAGE=registry.librechat.ai/danny-avila/librechat-dev
+# A thin wrapper over tchat-librechat -- this fork's own LibreChat build, from
+# the source in this repository -- so that (a) changes under api/, packages/ and
+# client/ reach production, and (b) runtime secrets come from Doppler at process
+# start instead of a .env file on the host.
+#
+# The wrapper adds nothing but Doppler and the entrypoint: keeping it separate
+# from the app image means a change to the secret-injection mechanism does not
+# rebuild the application, and the base stays swappable via build args.
+#
+# `Tchat images` overrides LIBRECHAT_TAG with the commit SHA it just built, so
+# tchat-api:<sha> and tchat-librechat:<sha> always carry the same source. The
+# default below only applies to a local build.
+ARG LIBRECHAT_IMAGE=ghcr.io/mrdjango/tchat-librechat
 ARG LIBRECHAT_TAG=latest
 FROM ${LIBRECHAT_IMAGE}:${LIBRECHAT_TAG}
 
