@@ -14,7 +14,6 @@ const {
   buildInlineMemoryTool,
   getCodeApiAuthHeaders,
   buildImageToolContext,
-  gatewayImageToolkit,
   SET_MEMORY_TOOL_NAME,
   buildWebSearchContext,
   DELETE_MEMORY_TOOL_NAME,
@@ -235,32 +234,6 @@ const loadTools = async ({
         ...authValues,
         isAgent: !!agent,
         req: options.req,
-        imageOutputType,
-        fileStrategy,
-        imageFiles,
-      });
-    },
-    image_gen_gateway: async (_toolContextMap, dynamicToolContextMap) => {
-      /** Shares `image_gen_oai`'s credentials and endpoint; only the model
-       *  differs, so an agent picks its image model by picking this tool. */
-      const authFields = getAuthFields('image_gen_oai');
-      const authValues = await loadAuthValues({ userId: user, authFields });
-      const imageFiles = options.tool_resources?.[EToolResources.image_edit]?.files ?? [];
-      const toolContext = buildImageToolContext({
-        imageFiles,
-        toolName: `${EToolResources.image_edit}_gateway`,
-        contextDescription: 'image editing',
-      });
-      if (toolContext) {
-        dynamicToolContextMap.image_edit_gateway = toolContext;
-      }
-      return createOpenAIImageTools({
-        ...authValues,
-        isAgent: !!agent,
-        req: options.req,
-        imageModel: process.env.IMAGE_GEN_GATEWAY_MODEL,
-        genToolConfig: gatewayImageToolkit.image_gen_gateway,
-        editToolConfig: gatewayImageToolkit.image_edit_gateway,
         imageOutputType,
         fileStrategy,
         imageFiles,

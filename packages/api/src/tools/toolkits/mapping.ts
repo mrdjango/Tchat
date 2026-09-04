@@ -5,10 +5,8 @@
  */
 export const toolkitExpansion: {
   readonly image_gen_oai: readonly ['image_edit_oai'];
-  readonly image_gen_gateway: readonly ['image_edit_gateway'];
 } = {
   image_gen_oai: ['image_edit_oai'],
-  image_gen_gateway: ['image_edit_gateway'],
 } as const satisfies Readonly<Record<string, readonly string[]>>;
 
 /** Reverse mapping: maps child tool names to their parent toolkit key */

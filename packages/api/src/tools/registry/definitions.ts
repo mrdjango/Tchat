@@ -1,8 +1,8 @@
 import { WebSearchToolDefinition, CalculatorToolDefinition } from '@librechat/agents';
 import type { ExtendedJsonSchema } from './schema';
 import { AskUserQuestionToolDefinition } from '~/agents/hitl/askUserQuestionTool';
-import { gatewayImageToolkit, oaiToolkit } from '~/tools/toolkits/oai';
 import { geminiToolkit } from '~/tools/toolkits/gemini';
+import { oaiToolkit } from '~/tools/toolkits/oai';
 
 export type { ExtendedJsonSchema } from './schema';
 
@@ -414,20 +414,6 @@ export const toolDefinitions: Record<string, ToolRegistryDefinition> = {
     schema: oaiToolkit.image_edit_oai.schema,
     toolType: 'builtin',
     responseFormat: oaiToolkit.image_edit_oai.responseFormat,
-  },
-  image_gen_gateway: {
-    name: gatewayImageToolkit.image_gen_gateway.name,
-    description: gatewayImageToolkit.image_gen_gateway.description,
-    schema: gatewayImageToolkit.image_gen_gateway.schema,
-    toolType: 'builtin',
-    responseFormat: gatewayImageToolkit.image_gen_gateway.responseFormat,
-  },
-  image_edit_gateway: {
-    name: gatewayImageToolkit.image_edit_gateway.name,
-    description: gatewayImageToolkit.image_edit_gateway.description,
-    schema: gatewayImageToolkit.image_edit_gateway.schema,
-    toolType: 'builtin',
-    responseFormat: gatewayImageToolkit.image_edit_gateway.responseFormat,
   },
   gemini_image_gen: {
     name: geminiToolkit.gemini_image_gen.name,
