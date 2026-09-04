@@ -21,10 +21,15 @@ interface BadgeRowContextType {
   webSearch: ReturnType<typeof useToolToggle>;
   artifacts: ReturnType<typeof useToolToggle>;
   fileSearch: ReturnType<typeof useToolToggle>;
+  imageGen: ReturnType<typeof useToolToggle>;
   codeInterpreter: ReturnType<typeof useToolToggle>;
   searchApiKeyForm: ReturnType<typeof useSearchApiKeyForm>;
   mcpServerManager: ReturnType<typeof useMCPServerManager>;
 }
+
+/** Key on `TEphemeralAgent`; not a `Tools` member, since one flag equips the
+ *  whole toolkit (`image_gen_oai` plus `image_edit_oai`). */
+const EPHEMERAL_IMAGE_GEN_KEY = 'image_gen';
 
 const BadgeRowContext = createContext<BadgeRowContextType | undefined>(undefined);
 
@@ -243,6 +248,15 @@ export default function BadgeRowProvider({
     isAuthenticated: true,
   });
 
+  /** ImageGen hook - the ephemeral flag equips the OpenAI image toolkit */
+  const imageGen = useToolToggle({
+    conversationId,
+    storageContextKey,
+    toolKey: EPHEMERAL_IMAGE_GEN_KEY,
+    localStorageKey: LocalStorageKeys.LAST_IMAGE_GEN_TOGGLE_,
+    isAuthenticated: true,
+  });
+
   /** Artifacts hook - using a custom key since it's not a Tool but a capability */
   const artifacts = useToolToggle({
     conversationId,
@@ -283,6 +297,7 @@ export default function BadgeRowProvider({
     webSearch,
     artifacts,
     fileSearch,
+    imageGen,
     agentsConfig,
     conversationId,
     storageContextKey,

@@ -21,6 +21,7 @@ import { synthesizeBackgroundToolOptions } from '~/agents/background';
 import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
 import { getCustomEndpointConfig } from '~/app/config';
+import { oaiToolkit } from '~/tools/toolkits/oai';
 
 const { mcp_all, mcp_delimiter } = Constants;
 
@@ -138,6 +139,7 @@ export async function loadAddedAgent(
         ask_user_question?: boolean;
         run_in_background?: boolean;
         describe_intent?: boolean;
+        image_gen?: boolean;
       }
     | undefined;
 
@@ -233,6 +235,10 @@ export async function loadAddedAgent(
    *  `createRun` gating (hitlCapable, non-subagent, admin filter) is uniform. */
   if (ephemeralAgent?.ask_user_question === true || modelSpec?.askUserQuestion === true) {
     tools.push(ASK_USER_QUESTION_TOOL_NAME);
+  }
+  /** `toolkitExpansion` adds `image_edit_oai`, so one flag equips both halves. */
+  if (ephemeralAgent?.image_gen === true || modelSpec?.imageGen === true) {
+    tools.push(oaiToolkit.image_gen_oai.name);
   }
 
   const addedServers = new Set<string>();

@@ -3751,6 +3751,7 @@ export enum LocalStorageKeys {
   LAST_WEB_SEARCH_TOGGLE_ = 'LAST_WEB_SEARCH_TOGGLE_',
   /** Last checked toggle for File Search per conversation ID */
   LAST_FILE_SEARCH_TOGGLE_ = 'LAST_FILE_SEARCH_TOGGLE_',
+  LAST_IMAGE_GEN_TOGGLE_ = 'LAST_IMAGE_GEN_TOGGLE_',
   /** Last checked toggle for Artifacts per conversation ID */
   LAST_ARTIFACTS_TOGGLE_ = 'LAST_ARTIFACTS_TOGGLE_',
   /** Last checked toggle for Skills per conversation ID */

@@ -1234,4 +1234,44 @@ describe('loadAgent', () => {
       }
     });
   });
+
+  it('equips the image toolkit from the ephemeral flag, so a plain chat can generate images', async () => {
+    const { EPHEMERAL_AGENT_ID } = Constants;
+    const mockReq = {
+      user: { id: 'user123' },
+      body: { ephemeralAgent: { image_gen: true } },
+    };
+
+    const result = await loadAgent(
+      {
+        req: mockReq,
+        agent_id: EPHEMERAL_AGENT_ID as string,
+        endpoint: 'openai',
+        model_parameters: { model: 'gpt-4' } as unknown as AgentModelParameters,
+      },
+      deps,
+    );
+
+    expect(result?.tools).toContain('image_gen_oai');
+  });
+
+  it('leaves the image toolkit off when the flag is absent', async () => {
+    const { EPHEMERAL_AGENT_ID } = Constants;
+    const mockReq = {
+      user: { id: 'user123' },
+      body: { ephemeralAgent: { web_search: true } },
+    };
+
+    const result = await loadAgent(
+      {
+        req: mockReq,
+        agent_id: EPHEMERAL_AGENT_ID as string,
+        endpoint: 'openai',
+        model_parameters: { model: 'gpt-4' } as unknown as AgentModelParameters,
+      },
+      deps,
+    );
+
+    expect(result?.tools).not.toContain('image_gen_oai');
+  });
 });

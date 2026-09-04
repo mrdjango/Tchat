@@ -1,7 +1,15 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon } from '@librechat/client';
-import { Brain, Globe, ScrollText, Settings, Settings2, TerminalSquareIcon } from 'lucide-react';
+import {
+  Brain,
+  Globe,
+  ImageIcon,
+  ScrollText,
+  Settings,
+  Settings2,
+  TerminalSquareIcon,
+} from 'lucide-react';
 import {
   AuthType,
   Permissions,
@@ -13,6 +21,7 @@ import type { MenuItemProps } from '~/common';
 import {
   useLocalize,
   useHasAccess,
+  useImageGenAvailable,
   useAuthContext,
   useHasMemoryAccess,
   useAgentCapabilities,
@@ -56,6 +65,8 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     permission: Permissions.USE,
   });
 
+  const imageGenAvailable = useImageGenAvailable();
+
   const canUseFileSearch = useHasAccess({
     permissionType: PermissionTypes.FILE_SEARCH,
     permission: Permissions.USE,
@@ -82,6 +93,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     webSearch,
     artifacts,
     fileSearch,
+    imageGen,
     mcpServerManager,
     codeInterpreter,
     searchApiKeyForm,
@@ -96,6 +108,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   } = webSearch ?? {};
   const { isPinned: isCodePinned, setIsPinned: setIsCodePinned } = codeInterpreter ?? {};
   const { isPinned: isFileSearchPinned, setIsPinned: setIsFileSearchPinned } = fileSearch ?? {};
+  const { isPinned: isImageGenPinned, setIsPinned: setIsImageGenPinned } = imageGen ?? {};
   const { isPinned: isArtifactsPinned, setIsPinned: setIsArtifactsPinned } = artifacts ?? {};
   const { isPinned: isSkillsPinned, setIsPinned: setIsSkillsPinned } = skills ?? {};
   const { isPinned: isMemoryPinned, setIsPinned: setIsMemoryPinned } = memory ?? {};
@@ -115,6 +128,11 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     const newValue = !codeInterpreter?.toggleState;
     codeInterpreter?.debouncedChange({ value: newValue });
   }, [codeInterpreter]);
+
+  const handleImageGenToggle = useCallback(() => {
+    const newValue = !imageGen?.toggleState;
+    imageGen?.debouncedChange({ value: newValue });
+  }, [imageGen]);
 
   const handleFileSearchToggle = useCallback(() => {
     const newValue = !fileSearch?.toggleState;
@@ -187,6 +205,38 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
           >
             <div className="h-4 w-4">
               <PinIcon unpin={isFileSearchPinned} />
+            </div>
+          </button>
+        </div>
+      ),
+    });
+  }
+
+  if (imageGenAvailable) {
+    dropdownItems.push({
+      onClick: handleImageGenToggle,
+      hideOnClick: false,
+      render: (props) => (
+        <div {...props}>
+          <div className="flex items-center gap-2">
+            <ImageIcon className="icon-md" />
+            <span>{localize('com_ui_image_gen')}</span>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsImageGenPinned?.(!isImageGenPinned);
+            }}
+            className={cn(
+              'rounded p-1 transition-all duration-200',
+              'hover:bg-surface-secondary hover:shadow-sm',
+              !isImageGenPinned && 'text-text-secondary hover:text-text-primary',
+            )}
+            aria-label={isImageGenPinned ? 'Unpin' : 'Pin'}
+          >
+            <div className="h-4 w-4">
+              <PinIcon unpin={isImageGenPinned} />
             </div>
           </button>
         </div>

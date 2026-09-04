@@ -57,6 +57,9 @@ export type TModelSpec = {
   memory?: boolean;
   /** Equip the spec's ephemeral agent with the `ask_user_question` HITL tool. */
   askUserQuestion?: boolean;
+  /** Equip the spec's ephemeral agent with the OpenAI image toolkit, so the
+   *  spec generates images without the user toggling anything. */
+  imageGen?: boolean;
   /**
    * Let the model dispatch tool calls in the background (poll results via
    * `check_background_task`). Code execution is background-NATIVE: when the
@@ -198,6 +201,7 @@ export const tModelSpecSchema = z.object({
   executeCode: z.boolean().optional(),
   memory: z.boolean().optional(),
   askUserQuestion: z.boolean().optional(),
+  imageGen: z.boolean().optional(),
   runInBackground: z.union([z.boolean(), z.array(z.string())]).optional(),
   describeIntent: z.union([z.boolean(), z.array(z.string())]).optional(),
   artifacts: z.union([z.string(), z.boolean()]).optional(),
