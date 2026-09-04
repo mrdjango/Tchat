@@ -128,7 +128,12 @@ services:
   # nginx puts behind Cloudflare Access, and it holds no credentials of its
   # own — it authenticates against tchat-api over the internal network.
   tchat-admin:
-    image: registry.librechat.ai/clickhouse/librechat-admin-panel:latest
+    # mrdjango/admin-panel: upstream's panel built against this fork's
+    # data-provider. Its configuration form is generated from that package's
+    # schema, so the stock image cannot edit fork-only config such as
+    # `modelSpecs.imageList`. Pin TCHAT_ADMIN_TAG to a commit SHA for a
+    # reproducible admin release; `latest` follows that fork's main.
+    image: ${TCHAT_ADMIN_IMAGE:-ghcr.io/mrdjango/tchat-admin}:${TCHAT_ADMIN_TAG:-latest}
     restart: unless-stopped
     environment:
       PORT: "3000"
