@@ -164,6 +164,12 @@ modelSpecs:
   # `protocol: gemini` routes through the tool that speaks Google's own API,
   # which the Gateway relays natively. It is required for `gemini-*-image`
   # models: the Gateway's OpenAI image endpoint serves the `imagen` family only.
+  #
+  # Only models verified reachable are listed. The catalog also carries
+  # `gpt-image-2-4k` (no channel serves it for group `pro`) and
+  # `gemini-3.1-flash-image-c` (tokens have no access to it); add them here once
+  # the Gateway grants them, because an entry that 403s is worse than no entry.
+  # Note that /v1/models is per user, so catalog visibility is not access.
   imageList:
     - name: 'gpt-image'
       label: 'GPT Image'
@@ -171,19 +177,9 @@ modelSpecs:
       model: 'gpt-image-2'
       default: true
 
-    - name: 'gpt-image-4k'
-      label: 'GPT Image 4K'
-      description: 'Higher-resolution output from the same OpenAI model family.'
-      model: 'gpt-image-2-4k'
-
     - name: 'gemini-image'
       label: 'Gemini Image'
       description: "Google's Gemini 3 Pro image model."
       model: 'gemini-3-pro-image-c'
       protocol: 'gemini'
 
-    - name: 'gemini-image-flash'
-      label: 'Gemini Image Flash'
-      description: 'Faster, cheaper Gemini image model.'
-      model: 'gemini-3.1-flash-image-c'
-      protocol: 'gemini'
