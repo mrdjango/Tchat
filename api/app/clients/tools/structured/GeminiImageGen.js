@@ -8,6 +8,7 @@ const { ContentTypes, EImageOutputType } = require('librechat-data-provider');
 const {
   geminiToolkit,
   loadServiceKey,
+  brokerUserHeaders,
   getBalanceConfig,
   getEnvProxyDispatcher,
   getTransactionsConfig,
@@ -92,17 +93,45 @@ async function convertImageFormat(inputBuffer, targetFormat) {
  * @param {string} [options.GOOGLE_KEY] - Google API key (resolved by loadAuthValues)
  * @returns {Promise<GoogleGenAI>} - The initialized client
  */
+/**
+ * `httpOptions` aiming the Google SDK at a gateway that speaks Gemini's own
+ * protocol instead of Google directly, or `undefined` when unset.
+ *
+ * The SDK sends the key as `x-goog-api-key`; `Authorization` is added because
+ * that is what the Tchat broker authenticates with before swapping in the
+ * signed-in user's own token. Identity headers come from `brokerUserHeaders`,
+ * which stays empty unless the base URL is the broker itself — so a base URL
+ * pointing anywhere else never carries the user's email.
+ *
+ * @param {ServerRequest} [req]
+ * @param {string} [apiKey]
+ * @returns {{ baseUrl: string, headers: Record<string, string> } | undefined}
+ */
+function getGatewayHttpOptions(req, apiKey) {
+  const baseUrl = process.env.GEMINI_IMAGE_GEN_BASEURL;
+  if (!baseUrl) {
+    return undefined;
+  }
+  const headers = { ...brokerUserHeaders(req, baseUrl) };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+  return { baseUrl, headers };
+}
+
 async function initializeGeminiClient(options = {}) {
   const geminiKey = options.GEMINI_API_KEY;
   if (geminiKey) {
     logger.debug('[GeminiImageGen] Using Gemini API with GEMINI_API_KEY');
-    return new GoogleGenAI({ apiKey: geminiKey });
+    const httpOptions = getGatewayHttpOptions(options.req, geminiKey);
+    return new GoogleGenAI({ apiKey: geminiKey, ...(httpOptions && { httpOptions }) });
   }
 
   const googleKey = options.GOOGLE_KEY;
   if (googleKey) {
     logger.debug('[GeminiImageGen] Using Gemini API with GOOGLE_KEY');
-    return new GoogleGenAI({ apiKey: googleKey });
+    const httpOptions = getGatewayHttpOptions(options.req, googleKey);
+    return new GoogleGenAI({ apiKey: googleKey, ...(httpOptions && { httpOptions }) });
   }
 
   logger.debug('[GeminiImageGen] Using Vertex AI with service account');
@@ -333,6 +362,7 @@ function createGeminiImageTool(fields = {}) {
         ai = await initializeGeminiClient({
           GEMINI_API_KEY,
           GOOGLE_KEY,
+          req,
         });
       } catch (error) {
         logger.error('[GeminiImageGen] Failed to initialize client:', error);

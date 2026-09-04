@@ -315,6 +315,34 @@ test('an image request without an identity header is refused before any relay', 
   assert.equal(calls.length, 0);
 });
 
+test("Gemini's native path relays on the user's own Gateway token", async () => {
+  const { impl, calls } = makeFetch({ tokens: [{ id: '43', name: 'TCHAT' }] });
+  const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
+
+  const response = await app(
+    new Request('http://broker.internal/v1beta/models/gemini-3-pro-image-c:generateContent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.sharedKey}`,
+        // The Google SDK sends the key here too; it must not reach upstream.
+        'x-goog-api-key': config.sharedKey,
+        'X-Tchat-User-Email': 'chat-user@example.com',
+      },
+      body: JSON.stringify({ contents: [{ parts: [{ text: 'a teal grid' }] }] }),
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  const upstream = calls.at(-1);
+  assert.equal(
+    upstream.url,
+    'https://api.tensorgrid.space/v1beta/models/gemini-3-pro-image-c:generateContent',
+  );
+  assert.equal(upstream.init.headers.get('authorization'), 'Bearer sk-revealed-user-token');
+  assert.equal(upstream.init.headers.get('x-goog-api-key'), null);
+});
+
 test('healthz needs no credentials and matches the stack-wide convention', async () => {
   const app = createApp({
     config,

@@ -14,12 +14,19 @@ const RELAY_PREFIXES = [
   '/v1/embeddings',
   '/v1/images/generations',
   '/v1/images/edits',
+  /** Google's own protocol, which the Gateway relays natively
+   *  (`/v1beta/models/{model}:{action}`). The built-in Gemini image tool speaks
+   *  it directly, so image generation there needs no OpenAI-shaped conversion. */
+  '/v1beta/models',
 ];
 
 /** Hop-by-hop and broker-private headers that must not reach the Gateway. */
 const STRIPPED = new Set([
   'authorization',
   'x-api-key',
+  /** The Google SDK sends the ingress key here as well as in Authorization;
+   *  forwarding it would hand the shared key to the Gateway and to Google. */
+  'x-goog-api-key',
   'host',
   'connection',
   'content-length',
