@@ -19,7 +19,9 @@ export const loadConfig = () => ({
   gatewaySecret: required('TENSORGRID_INTEGRATION_SECRET'),
   djangoBaseUrl: trimSlash(required('DJANGO_INTERNAL_BASE_URL')),
   gatewayInternalBaseUrl: trimSlash(required('MODELS_GATEWAY_INTERNAL_BASE_URL')),
-  /** Public inference origin the relay forwards to. */
+  /** Inference origin the relay forwards to. Compose points this at the
+   *  Gateway container; the public origin works but hairpins through
+   *  Cloudflare, which cuts a request off at ~125s. */
   upstreamBaseUrl: trimSlash(optional('TENSORGRID_API_BASE_URL', 'https://api.tensorgrid.space')),
   /** Name of the Gateway token this broker owns. Django hides it from the
    *  user's API-key list, so it must match RESERVED_TOKEN_NAMES there. */

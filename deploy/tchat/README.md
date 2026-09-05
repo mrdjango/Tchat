@@ -24,7 +24,7 @@ Cloudflare (chat.tensorgrid.space, proxied)
        │                                      tensorgrid_edge
        ├─ HMAC → backend:8000            resolve chat user → gateway subject
        ├─ HMAC → models-gateway:3000     mint / reveal that subject's token
-       └─ Bearer <user token> → https://api.tensorgrid.space/v1/...
+       └─ Bearer <user token> → models-gateway:3000/v1/...
 ```
 
 `tchat-api` also uses `tchat-mongo` (conversations) and `tchat-meili` (search).
@@ -65,6 +65,13 @@ Three independent locks, so no single misconfiguration opens the door:
 The broker is the backstop: it only relays `/v1/chat/completions`,
 `/v1/messages`, `/v1/models`, `/v1/embeddings`, `/v1/images/generations`,
 `/v1/images/edits`, and only to `TENSORGRID_API_BASE_URL`.
+
+That origin is the Gateway container itself, not `api.tensorgrid.space`. Both
+answer the same routes, but the public one leaves the host and comes back
+through Cloudflare, which closes a request that runs past ~125s and returns a
+524 HTML page in place of the response. Image generation regularly runs longer
+than that: the Gateway finishes the image and bills it, the caller sees only
+the 524, and the agent retries — paying twice for a picture nobody receives.
 
 The two image paths serve the `image_gen_oai` agent toolkit. A chat completion
 gets its `X-Tchat-User-*` headers from the `headers:` block of the `custom`
