@@ -48,6 +48,7 @@ const mockExtractCodeArtifactInspectionText = jest.fn(async () => ({
   complete: false,
 }));
 const mockExtractCodeArtifactText = jest.fn(async () => null);
+const mockExecuteWorkspaceTool = jest.fn();
 const mockGetExtractedTextFormat = jest.fn((_name, _mime, text) => (text == null ? null : 'text'));
 /* `hasOfficeHtmlPath` gates the persist-then-render split: when true, processCodeOutput
  * returns `{ file, finalize }` with the file persisted at `status: 'pending'`
@@ -65,19 +66,67 @@ jest.mock('@librechat/api', () => {
   const http = require('http');
   const https = require('https');
   return {
+    resolveDownloadPath: (file) => file.storageKey || file.filepath,
     logAxiosError: jest.fn(),
+    /* Behaviourally identical to the real predicate in
+     * `packages/api/src/files/code/errors.ts`, which owns the contract and
+     * its own spec. Inlined because this factory replaces the whole module
+     * and `requireActual` here would load the entire package. */
+    isMissingSandboxPathError: (reason) =>
+      /no such file or directory|cannot access|cannot find the path|enoent/i.test(reason),
     getBasePath: jest.fn(() => ''),
     sanitizeArtifactPath: jest.fn((name) => name),
     flattenArtifactPath: jest.fn((name) => name.replace(/\//g, '__')),
     createAxiosInstance: jest.fn(() => mockAxios),
+    normalizeArtifactDeliveryFailure: (value) =>
+      value?.code === 'artifact_delivery_failed'
+        ? {
+            code: value.code,
+            status: value.status,
+            attempted: value.attempted,
+            delivered: value.delivered,
+            failed: value.failed,
+          }
+        : undefined,
+    executeWorkspaceTool: (...args) => mockExecuteWorkspaceTool(...args),
     getCodeApiAuthHeaders: jest.fn(async () => ({})),
+    isAbortError: (error) =>
+      error?.name === 'AbortError' || error?.code === 'ABORT_ERR' || error?.code === 'ERR_CANCELED',
     /* Windowing, sizing and rate-limit policy are real code in
      * `packages/api` with their own tests (`files/code/image.spec.ts`,
      * `utils/code.spec.ts`). These stand-ins are deliberately inert
      * passthroughs — they assert nothing about that behavior, so the
      * transport tests below cover only what this file still owns. */
-    createCodeApiRateLimitBudget: jest.fn(() => ({ remainingMs: 20_000 })),
-    withCodeApiRateLimit: jest.fn(({ attempt }) => attempt()),
+    createCodeApiRateLimitBudget: jest.fn(() => ({
+      limitMs: 20_000,
+      waitedMs: 0,
+      activeWaitEnds: new Set(),
+    })),
+    getCodeApiUploadOptions: jest.fn(() => ({
+      scope: 'default:user-123',
+      concurrency: 3,
+      retryWaitMs: 20_000,
+    })),
+    withCodeApiRateLimit: jest.fn(async ({ attempt }) => {
+      try {
+        return await attempt();
+      } catch (error) {
+        if (error?.response?.status !== 429) {
+          throw error;
+        }
+        return attempt();
+      }
+    }),
+    withCodeApiUploadRecovery: jest.fn(async ({ openSource, upload }) => {
+      try {
+        return await upload(await openSource());
+      } catch (error) {
+        if (error?.response?.status !== 429) {
+          throw error;
+        }
+        return upload(await openSource());
+      }
+    }),
     buildSandboxImageReaderCode: jest.fn(
       ({ filePath, limit, offset, chunkBytes }) =>
         `read ${filePath} ${limit} ${offset} ${chunkBytes}`,
@@ -240,6 +289,12 @@ const {
   prepareCodeOutputForInspection,
   getSessionInfo,
   readSandboxFile,
+  readWorkspaceFile,
+  searchWorkspace,
+  listWorkspaceFiles,
+  writeWorkspaceFile,
+  previewWorkspaceEdit,
+  editWorkspaceFile,
   readSandboxImage,
   writeSandboxFile,
   primeFiles,
@@ -1450,6 +1505,33 @@ describe('Code Process', () => {
         expect(callConfig.httpsAgent.keepAlive).toBe(false);
       });
 
+      it('forwards cancellation to the freshness request and preserves its error', async () => {
+        const controller = new AbortController();
+        const canceled = Object.assign(new Error('canceled'), {
+          name: 'CanceledError',
+          code: 'ERR_CANCELED',
+        });
+        mockAxios.mockImplementationOnce(async (config) => {
+          expect(config.signal).toBe(controller.signal);
+          controller.abort();
+          throw canceled;
+        });
+
+        await expect(
+          getSessionInfo(
+            {
+              kind: 'user',
+              id: 'user-1',
+              storage_session_id: 'sess',
+              file_id: 'fid',
+            },
+            mockReq,
+            {},
+            controller.signal,
+          ),
+        ).rejects.toBe(canceled);
+      });
+
       it('forwards Code API auth headers when checking session object freshness', async () => {
         getCodeApiAuthHeaders.mockResolvedValueOnce({ Authorization: 'Bearer freshness-token' });
         mockAxios.mockResolvedValue({
@@ -1832,6 +1914,282 @@ describe('Code Process', () => {
     });
   });
 
+  describe('readWorkspaceFile', () => {
+    it('forwards authenticated reads to the selected attached worker', async () => {
+      const controller = new AbortController();
+      const result = {
+        protocolVersion: 1,
+        operation: 'read_file',
+        workspaceId: 'primary',
+        path: 'src/app.ts',
+        content: 'const ready = true;',
+        startLine: 1,
+        endLine: 1,
+        truncated: false,
+      };
+      getCodeApiAuthHeaders.mockResolvedValueOnce({ Authorization: 'Bearer workspace-token' });
+      mockExecuteWorkspaceTool.mockResolvedValueOnce(result);
+
+      await expect(
+        readWorkspaceFile({
+          file_path: 'src/app.ts',
+          workspace_id: 'primary',
+          start_line: 1,
+          max_lines: 200,
+          codeApiBaseUrl: 'https://attached-code.example.com/v1',
+          executionProfile: 'stateful',
+          bridgeWorkerId: 'worker-user-1',
+          req: mockReq,
+          signal: controller.signal,
+        }),
+      ).resolves.toBe(result);
+
+      expect(getCodeApiAuthHeaders).toHaveBeenCalledWith(mockReq, 'worker-user-1');
+      expect(mockExecuteWorkspaceTool).toHaveBeenCalledWith({
+        baseURL: 'https://attached-code.example.com/v1',
+        authHeaders: {
+          Authorization: 'Bearer workspace-token',
+          'X-CodeAPI-Expected-Profile': 'stateful',
+          'X-LibreChat-Code-Worker-ID': 'worker-user-1',
+        },
+        request: {
+          protocolVersion: 1,
+          operation: 'read_file',
+          workspaceId: 'primary',
+          path: 'src/app.ts',
+          startLine: 1,
+          maxLines: 200,
+        },
+        signal: controller.signal,
+      });
+    });
+  });
+
+  describe('searchWorkspace', () => {
+    it('forwards authenticated literal search to the selected attached worker', async () => {
+      const controller = new AbortController();
+      const result = {
+        protocolVersion: 1,
+        operation: 'search_text',
+        workspaceId: 'primary',
+        matches: [],
+        truncated: false,
+      };
+      getCodeApiAuthHeaders.mockResolvedValueOnce({ Authorization: 'Bearer workspace-token' });
+      mockExecuteWorkspaceTool.mockResolvedValueOnce(result);
+
+      await expect(
+        searchWorkspace({
+          query: 'needle',
+          workspace_id: 'primary',
+          path: 'src',
+          max_results: 20,
+          codeApiBaseUrl: 'https://attached-code.example.com/v1',
+          executionProfile: 'stateful',
+          bridgeWorkerId: 'worker-user-1',
+          req: mockReq,
+          signal: controller.signal,
+        }),
+      ).resolves.toBe(result);
+
+      expect(mockExecuteWorkspaceTool).toHaveBeenCalledWith({
+        baseURL: 'https://attached-code.example.com/v1',
+        authHeaders: {
+          Authorization: 'Bearer workspace-token',
+          'X-CodeAPI-Expected-Profile': 'stateful',
+          'X-LibreChat-Code-Worker-ID': 'worker-user-1',
+        },
+        request: {
+          protocolVersion: 1,
+          operation: 'search_text',
+          workspaceId: 'primary',
+          query: 'needle',
+          path: 'src',
+          maxResults: 20,
+        },
+        signal: controller.signal,
+      });
+    });
+  });
+
+  describe('listWorkspaceFiles', () => {
+    it('forwards authenticated listing to the selected attached worker', async () => {
+      const controller = new AbortController();
+      const result = {
+        protocolVersion: 1,
+        operation: 'list_files',
+        workspaceId: 'primary',
+        paths: ['src/app.ts'],
+        truncated: false,
+      };
+      getCodeApiAuthHeaders.mockResolvedValueOnce({ Authorization: 'Bearer workspace-token' });
+      mockExecuteWorkspaceTool.mockResolvedValueOnce(result);
+
+      await expect(
+        listWorkspaceFiles({
+          workspace_id: 'primary',
+          path: 'src',
+          after_path: 'src/app.ts',
+          max_results: 20,
+          codeApiBaseUrl: 'https://attached-code.example.com/v1',
+          executionProfile: 'stateful',
+          bridgeWorkerId: 'worker-user-1',
+          req: mockReq,
+          signal: controller.signal,
+        }),
+      ).resolves.toBe(result);
+
+      expect(mockExecuteWorkspaceTool).toHaveBeenCalledWith({
+        baseURL: 'https://attached-code.example.com/v1',
+        authHeaders: {
+          Authorization: 'Bearer workspace-token',
+          'X-CodeAPI-Expected-Profile': 'stateful',
+          'X-LibreChat-Code-Worker-ID': 'worker-user-1',
+        },
+        request: {
+          protocolVersion: 1,
+          operation: 'list_files',
+          workspaceId: 'primary',
+          path: 'src',
+          afterPath: 'src/app.ts',
+          maxResults: 20,
+        },
+        signal: controller.signal,
+      });
+    });
+  });
+
+  describe('workspace mutations', () => {
+    it('forwards create-only writes to the selected attached worker', async () => {
+      const controller = new AbortController();
+      const result = {
+        protocolVersion: 1,
+        operation: 'write_file',
+        workspaceId: 'primary',
+        path: 'src/new.ts',
+        created: true,
+        bytesWritten: 5,
+      };
+      getCodeApiAuthHeaders.mockResolvedValueOnce({ Authorization: 'Bearer workspace-token' });
+      mockExecuteWorkspaceTool.mockResolvedValueOnce(result);
+
+      await expect(
+        writeWorkspaceFile({
+          file_path: 'src/new.ts',
+          content: 'ready',
+          overwrite: false,
+          workspace_id: 'primary',
+          codeApiBaseUrl: 'https://attached-code.example.com/v1',
+          executionProfile: 'stateful',
+          bridgeWorkerId: 'worker-user-1',
+          req: mockReq,
+          signal: controller.signal,
+        }),
+      ).resolves.toBe(result);
+
+      expect(mockExecuteWorkspaceTool).toHaveBeenCalledWith({
+        baseURL: 'https://attached-code.example.com/v1',
+        authHeaders: {
+          Authorization: 'Bearer workspace-token',
+          'X-CodeAPI-Expected-Profile': 'stateful',
+          'X-LibreChat-Code-Worker-ID': 'worker-user-1',
+        },
+        request: {
+          protocolVersion: 1,
+          operation: 'write_file',
+          workspaceId: 'primary',
+          path: 'src/new.ts',
+          content: 'ready',
+          overwrite: false,
+        },
+        signal: controller.signal,
+      });
+    });
+
+    it('forwards an edit batch as one attached-worker request', async () => {
+      const result = {
+        protocolVersion: 1,
+        operation: 'edit_file',
+        workspaceId: 'primary',
+        path: 'src/app.ts',
+        replacements: 2,
+        bytesWritten: 20,
+      };
+      getCodeApiAuthHeaders.mockResolvedValueOnce({ Authorization: 'Bearer workspace-token' });
+      mockExecuteWorkspaceTool.mockResolvedValueOnce(result);
+
+      await expect(
+        editWorkspaceFile({
+          file_path: 'src/app.ts',
+          edits: [
+            { oldText: 'draft', newText: 'ready' },
+            { oldText: 'false', newText: 'true' },
+          ],
+          workspace_id: 'primary',
+          codeApiBaseUrl: 'https://attached-code.example.com/v1',
+          executionProfile: 'stateful',
+          bridgeWorkerId: 'worker-user-1',
+          req: mockReq,
+          expected_base_sha256: 'a'.repeat(64),
+        }),
+      ).resolves.toBe(result);
+
+      expect(mockExecuteWorkspaceTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: {
+            protocolVersion: 1,
+            operation: 'edit_file',
+            workspaceId: 'primary',
+            path: 'src/app.ts',
+            edits: [
+              { oldText: 'draft', newText: 'ready' },
+              { oldText: 'false', newText: 'true' },
+            ],
+            expectedBaseSha256: 'a'.repeat(64),
+          },
+        }),
+      );
+    });
+
+    it('forwards a non-mutating attached-workspace edit preview', async () => {
+      const result = {
+        protocolVersion: 1,
+        operation: 'preview_edit',
+        workspaceId: 'primary',
+        path: 'src/app.ts',
+        content: 'prefix SECRET',
+        hasUtf8Bom: false,
+        baseSha256: 'b'.repeat(64),
+        replacements: 1,
+        bytesWritten: 13,
+      };
+      mockExecuteWorkspaceTool.mockResolvedValueOnce(result);
+
+      await expect(
+        previewWorkspaceEdit({
+          file_path: 'src/app.ts',
+          edits: [{ oldText: ' SEC', newText: ' SECRET' }],
+          workspace_id: 'primary',
+          codeApiBaseUrl: 'https://attached-code.example.com/v1',
+          executionProfile: 'stateful',
+          req: mockReq,
+        }),
+      ).resolves.toBe(result);
+
+      expect(mockExecuteWorkspaceTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: {
+            protocolVersion: 1,
+            operation: 'preview_edit',
+            workspaceId: 'primary',
+            path: 'src/app.ts',
+            edits: [{ oldText: ' SEC', newText: ' SECRET' }],
+          },
+        }),
+      );
+    });
+  });
+
   describe('readSandboxFile', () => {
     /**
      * `readSandboxFile` shells `cat <file_path>` through the sandbox
@@ -2071,6 +2429,43 @@ describe('Code Process', () => {
           }),
         );
       });
+
+      /* `create_file` reads its target before writing so it can tell a create
+       * from an overwrite, so an absent path is the ordinary case. Reported at
+       * error level it made every file creation look like a lost file — and
+       * `logAxiosError` rendered the sandbox's own stderr as "An error occurred
+       * while setting up the request", which reads as a transport fault. */
+      it('logs an absent path at debug, not through the error-level axios logger', async () => {
+        const { logAxiosError } = require('@librechat/api');
+        mockAxios.mockResolvedValueOnce({
+          data: { stdout: '', stderr: 'cat: /mnt/data/SKILL.md: No such file or directory\n' },
+        });
+
+        await expect(readSandboxFile({ file_path: '/mnt/data/SKILL.md' })).rejects.toThrow(
+          'No such file or directory',
+        );
+
+        expect(logAxiosError).not.toHaveBeenCalled();
+        expect(logger.error).not.toHaveBeenCalled();
+        expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('/mnt/data/SKILL.md'));
+      });
+
+      it('still reports a non-missing sandbox read failure at error level', async () => {
+        const { logAxiosError } = require('@librechat/api');
+        mockAxios.mockResolvedValueOnce({
+          data: { stdout: '', stderr: 'cat: /mnt/data/x.txt: Permission denied\n' },
+        });
+
+        await expect(readSandboxFile({ file_path: '/mnt/data/x.txt' })).rejects.toThrow(
+          'Permission denied',
+        );
+
+        expect(logger.debug).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Permission denied'));
+        /* The sandbox answered; nothing about the request failed, so the
+         * axios-shaped logger would misattribute this to the transport. */
+        expect(logAxiosError).not.toHaveBeenCalled();
+      });
     });
 
     describe('timeout', () => {
@@ -2130,6 +2525,38 @@ describe('Code Process', () => {
         session_id: 'sess-new',
         files: [{ id: 'file-new', name: 'new.txt' }],
       });
+    });
+
+    it('forwards only a valid bounded artifact delivery failure', async () => {
+      mockAxios.mockResolvedValueOnce({
+        data: {
+          stdout: 'WROTE 1 bytes to /mnt/data/new.txt\n',
+          session_id: 'sess-new',
+          files: [],
+          artifact_delivery: {
+            code: 'artifact_delivery_failed',
+            status: 'failed',
+            attempted: 1,
+            delivered: 0,
+            failed: 1,
+            detail: 'private object storage failure',
+          },
+        },
+      });
+
+      const result = await writeSandboxFile({
+        file_path: '/mnt/data/new.txt',
+        content: 'x',
+      });
+
+      expect(result.artifact_delivery).toEqual({
+        code: 'artifact_delivery_failed',
+        status: 'failed',
+        attempted: 1,
+        delivered: 0,
+        failed: 1,
+      });
+      expect(JSON.stringify(result)).not.toContain('private object storage failure');
     });
 
     it('encodes path and content in a base64 JSON payload instead of shell-interpolating them', async () => {
@@ -2214,6 +2641,112 @@ describe('Code Process', () => {
       mockAxios.mockResolvedValue({ data: null });
       return { handleFileUpload, getDownloadStream };
     }
+
+    it('recovers a throttled stale-file reupload with a fresh stream', async () => {
+      const controller = new AbortController();
+      const dbFile = {
+        file_id: 'rate-limited-file',
+        filename: 'report.csv',
+        filepath: '/uploads/report.csv',
+        source: 'local',
+        context: 'execute_code',
+        metadata: {
+          codeEnvRef: {
+            kind: 'user',
+            id: 'user-123',
+            storage_session_id: 'OLD_SESSION',
+            file_id: 'OLD_ID',
+          },
+        },
+      };
+      const rateLimit = Object.assign(new Error('Request failed with status code 429'), {
+        isAxiosError: true,
+        response: { status: 429, headers: { 'retry-after': '0' } },
+      });
+      const handleFileUpload = jest
+        .fn()
+        .mockRejectedValueOnce(rateLimit)
+        .mockResolvedValueOnce({ storage_session_id: 'NEW_SESSION', file_id: 'NEW_ID' });
+      const getDownloadStream = jest
+        .fn()
+        .mockResolvedValueOnce('first-stream')
+        .mockResolvedValueOnce('second-stream');
+      getStrategyFunctions.mockImplementation((source) =>
+        source === 'execute_code' ? { handleFileUpload } : { getDownloadStream },
+      );
+      getFiles.mockResolvedValue([dbFile]);
+      filterFilesByAgentAccess.mockImplementation(({ files }) => Promise.resolve(files));
+      mockAxios.mockResolvedValue({ data: null });
+      updateFile.mockResolvedValue({});
+
+      const result = await primeFiles({
+        req: { user: { id: 'user-123', role: 'USER' } },
+        tool_resources: { execute_code: { file_ids: [dbFile.file_id], files: [] } },
+        agentId: 'agent-id',
+        signal: controller.signal,
+      });
+
+      const { withCodeApiUploadRecovery } = require('@librechat/api');
+      expect(withCodeApiUploadRecovery).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal }),
+      );
+      expect(handleFileUpload).toHaveBeenCalledTimes(2);
+      expect(handleFileUpload).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal }),
+      );
+      expect(getDownloadStream).toHaveBeenCalledTimes(2);
+      expect(getDownloadStream).toHaveBeenCalledWith(expect.anything(), '/uploads/report.csv', {
+        signal: controller.signal,
+      });
+      expect(handleFileUpload.mock.calls.map(([args]) => args.stream)).toEqual([
+        'first-stream',
+        'second-stream',
+      ]);
+      expect(result.files).toEqual([
+        expect.objectContaining({ id: 'NEW_ID', storage_session_id: 'NEW_SESSION' }),
+      ]);
+    });
+
+    it('propagates cancellation from a stale-file reupload', async () => {
+      const controller = new AbortController();
+      const dbFile = {
+        file_id: 'canceled-file',
+        filename: 'report.csv',
+        filepath: '/uploads/report.csv',
+        source: 'local',
+        context: 'execute_code',
+        metadata: {
+          codeEnvRef: {
+            kind: 'user',
+            id: 'user-123',
+            storage_session_id: 'OLD_SESSION',
+            file_id: 'OLD_ID',
+          },
+        },
+      };
+      const handleFileUpload = jest.fn(async () => {
+        controller.abort();
+        controller.signal.throwIfAborted();
+      });
+      getStrategyFunctions.mockImplementation((source) =>
+        source === 'execute_code'
+          ? { handleFileUpload }
+          : { getDownloadStream: jest.fn().mockResolvedValue('stream') },
+      );
+      getFiles.mockResolvedValue([dbFile]);
+      filterFilesByAgentAccess.mockImplementation(({ files }) => Promise.resolve(files));
+      mockAxios.mockResolvedValue({ data: null });
+
+      await expect(
+        primeFiles({
+          req: { user: { id: 'user-123', role: 'USER' } },
+          tool_resources: { execute_code: { file_ids: [dbFile.file_id], files: [] } },
+          agentId: 'agent-id',
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(handleFileUpload).toHaveBeenCalledTimes(1);
+    });
 
     it('uses the permission resource type established by the calling route', async () => {
       const files = [
@@ -2341,6 +2874,7 @@ describe('Code Process', () => {
       expect(getDownloadStream).toHaveBeenCalledWith(
         { user: { id: 'user-123', role: 'USER' } },
         '/uploads/trusted.txt',
+        { signal: undefined },
       );
       expect(handleFileUpload).toHaveBeenCalledTimes(1);
     });
@@ -2388,6 +2922,42 @@ describe('Code Process', () => {
           kind: 'user',
         },
       ]);
+    });
+
+    it('reuploads a recovered converted image under its advertised sandbox name', async () => {
+      getFiles.mockResolvedValue([
+        {
+          file_id: 'converted-image',
+          filename: 'photo.png',
+          filepath: '/uploads/photo.webp',
+          type: 'image/webp',
+          source: 'local',
+          context: 'execute_code',
+          metadata: {
+            codeEnvRef: {
+              kind: 'user',
+              id: 'user-123',
+              storage_session_id: 'OLD_SESSION',
+              file_id: 'OLD_ID',
+            },
+          },
+        },
+      ]);
+      const { handleFileUpload } = setupReuploadMocks({
+        storage_session_id: 'NEW_SESSION',
+        file_id: 'NEW_ID',
+      });
+
+      const result = await primeFiles({
+        req: { user: { id: 'user-123', role: 'USER' } },
+        tool_resources: { execute_code: { file_ids: ['converted-image'], files: [] } },
+        agentId: 'agent-id',
+      });
+
+      expect(handleFileUpload).toHaveBeenCalledWith(
+        expect.objectContaining({ filename: 'photo.webp' }),
+      );
+      expect(result.files?.[0]?.name).toBe('photo.webp');
     });
 
     /* Phase C / option α (codeapi #1455): reupload preserves the
@@ -2616,6 +3186,7 @@ describe('Code Process', () => {
       ],
       ['Azure BlobNotFound', { code: 'BlobNotFound', statusCode: 404 }, 'missing_backing_object'],
       ['storage access denied', { code: 'AccessDenied', status: 403 }, 'resource_access_denied'],
+      ['Code API throttling', { code: 'CODE_API_RATE_LIMITED', status: 429 }, 'rate_limited'],
     ])(
       'fails with a typed recovery error for %s',
       async (_errorShape, downloadError, expectedCategory) => {
@@ -2740,6 +3311,28 @@ describe('Code Process', () => {
           kind: 'user',
         },
       ]);
+    });
+
+    it('mounts a converted image under the name the sandbox actually holds', async () => {
+      /* Image uploads are converted to the configured output type while the record keeps
+       * the original filename. Provisioning uploaded the converted name, so rebuilding
+       * the mount path from the record advertises a file the sandbox does not have. */
+      setupSessionInfoOk();
+      getFiles.mockResolvedValue([
+        makeFile({
+          file_id: 'fid-ready',
+          filename: 'photo.png',
+          type: 'image/webp',
+        }),
+      ]);
+
+      const result = await primeFiles({
+        req: { user: { id: 'user-123', role: 'USER' } },
+        tool_resources: { execute_code: { file_ids: ['fid-ready'], files: [] } },
+        agentId: 'agent-id',
+      });
+
+      expect(result.files?.[0]?.name).toBe('photo.webp');
     });
 
     it('annotates a pending file with "(preview not yet generated)"', async () => {
@@ -3122,6 +3715,7 @@ describe('Code Process', () => {
     });
 
     it('forwards the sandbox session, runtime hint and profile header', async () => {
+      const controller = new AbortController();
       mockAxios.mockResolvedValue({ data: { stdout: '{}' } });
 
       await readSandboxImage({
@@ -3131,6 +3725,7 @@ describe('Code Process', () => {
         files: [{ id: 'file-1', name: 'seed.csv' }],
         codeApiBaseUrl: 'https://code-stateful.example.com',
         executionProfile: 'stateful',
+        signal: controller.signal,
       });
 
       expect(mockAxios).toHaveBeenCalledTimes(1);
@@ -3143,6 +3738,11 @@ describe('Code Process', () => {
         files: [{ id: 'file-1', name: 'seed.csv' }],
       });
       expect(call.headers['X-CodeAPI-Expected-Profile']).toBe('stateful');
+      expect(call.signal).toBe(controller.signal);
+      const { withCodeApiRateLimit } = require('@librechat/api');
+      expect(withCodeApiRateLimit).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal }),
+      );
     });
 
     it('omits the profile header and optional session fields when unset', async () => {

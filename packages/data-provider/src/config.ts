@@ -71,6 +71,8 @@ export const excludedKeys = new Set([
   'conversationId',
   'agentEventBinding',
   'agentEventActor',
+  'agentEventActorCleanup',
+  'agentEventActorSuspension',
   'agentEventActorReconciliations',
   'agentEventActorEpoch',
   'agentEventActorLegacyTurn',
@@ -845,30 +847,36 @@ const remoteApiOidcScopeSchema = z.string().refine((scope) => !scope.includes(',
   message: 'scopes must be space-separated',
 });
 
-const remoteApiOidcSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    issuer: remoteApiOidcUrlSchema.optional(),
-    audience: z.string().min(1).optional(),
-    jwksUri: remoteApiOidcUrlSchema.optional(),
-    scope: remoteApiOidcScopeSchema.optional(),
-  })
-  .superRefine((oidc, ctx) => {
-    if (oidc.enabled === true && !oidc.issuer) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['issuer'],
-        message: 'issuer is required when OIDC auth is enabled',
-      });
-    }
-    if (oidc.enabled === true && !oidc.audience) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['audience'],
-        message: 'audience is required when OIDC auth is enabled',
-      });
-    }
-  });
+const oidcAccessTokenSchema = z.object({
+  enabled: z.boolean().default(false),
+  issuer: remoteApiOidcUrlSchema.optional(),
+  audience: z.string().min(1).optional(),
+  jwksUri: remoteApiOidcUrlSchema.optional(),
+});
+
+function validateEnabledOidc(
+  oidc: z.infer<typeof oidcAccessTokenSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (oidc.enabled === true && !oidc.issuer) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['issuer'],
+      message: 'issuer is required when OIDC auth is enabled',
+    });
+  }
+  if (oidc.enabled === true && !oidc.audience) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['audience'],
+      message: 'audience is required when OIDC auth is enabled',
+    });
+  }
+}
+
+const remoteApiOidcSchema = oidcAccessTokenSchema
+  .extend({ scope: remoteApiOidcScopeSchema.optional() })
+  .superRefine(validateEnabledOidc);
 
 const remoteApiAuthSchema = z.object({
   apiKey: z
@@ -882,6 +890,59 @@ const remoteApiAuthSchema = z.object({
 const remoteApiSchema = z.object({
   auth: remoteApiAuthSchema.optional(),
 });
+
+const managementClientBindingSchema = z
+  .object({
+    clientId: z.string().trim().min(1).max(128),
+    subject: z.string().trim().min(1).max(512).optional(),
+    userId: z
+      .string()
+      .trim()
+      .regex(/^[a-f\d]{24}$/i, 'must be a MongoDB ObjectId')
+      .transform((userId) => userId.toLowerCase()),
+    tenantId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, 'must be a valid tenant id')
+      .refine((tenantId) => tenantId !== '__SYSTEM__', 'system tenant is not allowed'),
+    enabled: z.boolean().default(true),
+  })
+  .strict();
+
+const managementApiOidcSchema = oidcAccessTokenSchema.strict().superRefine(validateEnabledOidc);
+
+const managementApiAuthSchema = z
+  .object({
+    oidc: managementApiOidcSchema,
+    clients: z.array(managementClientBindingSchema).max(100).default([]),
+  })
+  .strict()
+  .superRefine((auth, ctx) => {
+    if (auth.oidc.enabled === true && auth.clients.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['clients'],
+        message: 'at least one client binding is required when management auth is enabled',
+      });
+    }
+
+    const clientIds = new Set<string>();
+    for (let index = 0; index < auth.clients.length; index++) {
+      const client = auth.clients[index];
+      if (clientIds.has(client.clientId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['clients', index, 'clientId'],
+          message: 'client IDs must be unique',
+        });
+      }
+      clientIds.add(client.clientId);
+    }
+  });
+
+const managementApiSchema = z.object({ auth: managementApiAuthSchema.optional() }).strict();
 
 /**
  * Permission mode applied to a tool call. Mirrors `@librechat/agents`'s
@@ -1055,6 +1116,11 @@ const codeEnvironmentPermissionFieldSchema = z
     }
   });
 
+/** Existing attached commands used a fixed 30-second execution budget. */
+export const CODE_ENVIRONMENT_COMMAND_TIMEOUT_DEFAULT_MS = 30_000;
+/** Protocol-level ceiling; deployments may only lower this value. */
+export const CODE_ENVIRONMENT_COMMAND_TIMEOUT_HARD_MAX_MS = 5 * 60_000;
+
 /**
  * Typed user-tunable surface for one attached code environment. Omitted fields
  * remain fixed at LibreChat's safe baseline. Isolation, networking, mounts,
@@ -1066,6 +1132,19 @@ export const codeEnvironmentUserConfigSchema = z
       .object({
         fileWrite: codeEnvironmentPermissionFieldSchema.optional(),
         commandExecution: codeEnvironmentPermissionFieldSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    limits: z
+      .object({
+        /** Maximum timeout a Bash invocation may request. Omission preserves
+         * the historical 30-second command budget. */
+        maxCommandTimeoutMs: z
+          .number()
+          .int()
+          .min(1)
+          .max(CODE_ENVIRONMENT_COMMAND_TIMEOUT_HARD_MAX_MS)
+          .optional(),
       })
       .strict()
       .optional(),
@@ -1087,6 +1166,10 @@ export const codeEnvironmentUserSettingsSchema = z
   .strict();
 
 export type CodeEnvironmentUserSettings = z.infer<typeof codeEnvironmentUserSettingsSchema>;
+
+export type CodeWorkerEnrollmentPolicy = NonNullable<
+  NonNullable<z.infer<typeof agentsEndpointSchema>['statefulCodeSessions']>['principalWorkers']
+>;
 
 export const agentsEndpointSchema = baseEndpointSchema
   .omit({ baseURL: true })
@@ -1118,6 +1201,10 @@ export const agentsEndpointSchema = baseEndpointSchema
         .max(MAX_SUBAGENTS_CEILING)
         .optional()
         .default(MAX_SUBAGENTS),
+      /** Maximum concurrent Code API uploads per route and authenticated principal. */
+      codeApiUploadConcurrency: z.number().int().min(1).max(100).optional().default(3),
+      /** Maximum wall-clock time spent waiting on Code API rate limits per operation. */
+      codeApiMaxRetryWaitMs: z.number().int().min(0).max(300_000).optional().default(20_000),
       allowedProviders: z.array(z.union([z.string(), eModelEndpointSchema])).optional(),
       capabilities: z
         .array(z.nativeEnum(AgentCapabilities))
@@ -1128,6 +1215,15 @@ export const agentsEndpointSchema = baseEndpointSchema
       statefulCodeSessions: z
         .object({
           allowedEnvironments: z.array(z.enum(STATEFUL_CODE_ENVIRONMENTS)).min(1),
+          /** Server-only personal worker enrollment policy. Effective principal
+           * policy may tighten, but never raise, the deployment ceiling. */
+          principalWorkers: z
+            .object({
+              enabled: z.boolean().optional(),
+              /** Defaults to five. Zero disables enrollment; existing machines remain usable. */
+              maxPerUser: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+            })
+            .optional(),
           /** Operator-managed execution environments. Attached entries route to a
            * Code API deployment backed by an outbound librechat-code worker. */
           environments: z
@@ -1262,6 +1358,9 @@ export const agentsEndpointSchema = baseEndpointSchema
       backgroundTasks: z
         .object({
           completionWakeups: z.boolean().optional().default(true),
+          /** Cooperative cancellation for process-local ordinary tools. Off
+           * by default so existing deployments opt into the new control. */
+          ordinaryToolCancellation: z.boolean().optional().default(false),
         })
         .optional(),
       skills: z
@@ -1269,6 +1368,7 @@ export const agentsEndpointSchema = baseEndpointSchema
           maxCatalogSkills: z.number().int().min(1).max(100).optional(),
         })
         .optional(),
+      managementApi: managementApiSchema.optional(),
       remoteApi: remoteApiSchema.optional(),
       /** Human-in-the-loop tool approval policy. Off by default. */
       toolApproval: toolApprovalPolicySchema,
@@ -1581,6 +1681,33 @@ const sttSchema = z.object({
   azureOpenAI: sttAzureOpenAISchema.optional(),
 });
 
+/**
+ * The speech providers a schema actually configures. `allowedAddresses` is transport
+ * policy rather than a provider, and a provider key present but empty configures
+ * nothing. The speech services accept a schema only when exactly one survives here, so
+ * the upload router reads availability from the same list and never routes audio to a
+ * transcription that cannot run.
+ */
+export function listConfiguredSpeechProviders(
+  schema?: Record<string, unknown> | null,
+): Array<[string, Record<string, unknown>]> {
+  if (schema == null) {
+    return [];
+  }
+  return Object.entries(schema).filter(
+    ([key, value]) =>
+      key !== 'allowedAddresses' &&
+      value != null &&
+      typeof value === 'object' &&
+      Object.keys(value).length > 0,
+  ) as Array<[string, Record<string, unknown>]>;
+}
+
+/** Whether a speech schema names exactly one usable provider. */
+export function isSpeechProviderConfigured(schema?: Record<string, unknown> | null): boolean {
+  return listConfiguredSpeechProviders(schema).length === 1;
+}
+
 const speechTab = z
   .object({
     conversationMode: z.boolean().optional(),
@@ -1687,8 +1814,16 @@ export type TTermsOfService = z.infer<typeof termsOfServiceSchema>;
 const localizedStringSchema = z.union([z.string(), z.record(z.string())]);
 export type LocalizedString = z.infer<typeof localizedStringSchema>;
 
+export const mcpRefreshDefaults = {
+  toolsRefreshInterval: 5 * 60 * 1000,
+  statusRefreshInterval: 30 * 1000,
+};
+
 const mcpServersSchema = z
   .object({
+    /** Foreground polling intervals in milliseconds; 0 disables polling. */
+    toolsRefreshInterval: z.number().int().nonnegative().max(2_147_483_647).optional(),
+    statusRefreshInterval: z.number().int().nonnegative().max(2_147_483_647).optional(),
     placeholder: z.string().optional(),
     use: z.boolean().optional(),
     create: z.boolean().optional(),
@@ -1752,6 +1887,7 @@ export const interfaceSchema = z
       .optional(),
     temporaryChat: z.boolean().optional(),
     temporaryChatRetention: z.number().min(1).max(8760).optional(),
+    generalChatRetention: z.number().min(1).max(8760).optional(),
     autoSubmitFromUrl: z.boolean().optional(),
     retentionMode: z.nativeEnum(RetentionMode).default(RetentionMode.TEMPORARY),
     retainAgentFiles: z.boolean().optional(),
@@ -1823,7 +1959,10 @@ export const interfaceSchema = z
           maxPerUser: z.number().int().min(0).optional(),
           minIntervalMinutes: z.number().int().min(1).optional(),
           autoDisableAfterFailures: z.number().int().min(1).optional(),
+          admissionConcurrency: z.number().int().min(1).max(100).optional(),
           fireConcurrency: z.number().int().min(1).optional(),
+          mcpPreflightConcurrency: z.number().int().min(1).max(10).optional(),
+          mcpPreflightTimeoutMs: z.number().int().min(1000).max(600000).optional(),
           /** Refuse schedules that are not filed under a chat project. Enforced on
            *  create/update AND at every fire, so raising it later stops schedules
            *  that predate the policy instead of grandfathering them. */
@@ -1944,12 +2083,22 @@ export type TRumConfig = {
 
 export type StartupConfigContext = 'share';
 
+/**
+ * Per-endpoint dropParams for the startup config. Most endpoints (e.g. `custom`) map a
+ * provider name directly to its dropParams. `azureOpenAI` instead maps a provider name to
+ * a per-model dropParams lookup, since each Azure group can drop different parameters.
+ */
+export type EndpointsDropParamsMap = Record<string, string[] | Record<string, string[]>>;
+
 export type TStartupConfig = {
   appTitle: string;
   socialLogins?: string[];
   langfuseFanoutEnabled?: boolean;
   langfuseConnectionAccess?: boolean;
   insightsEnabled?: boolean;
+  /** Manual context compaction, gated by the same `summarization.enabled`
+   *  switch that governs the automatic detour. */
+  compactionEnabled?: boolean;
   interface?: TInterfaceConfig;
   turnstile?: TTurnstileConfig;
   balance?: TBalanceConfig;
@@ -2041,6 +2190,7 @@ export type TStartupConfig = {
     buildDate?: string | null;
   };
   fileUploadSseEnabled?: boolean;
+  endpointsDropParamsMap?: EndpointsDropParamsMap;
 };
 
 export type TSharedLinkStartupInterface = Pick<
@@ -2421,6 +2571,69 @@ export const messageFilterSchema = z.object({
 
 export type MessageFilterConfig = z.infer<typeof messageFilterSchema>;
 
+/** User fields a deployment may select as the Langfuse trace `userId`. */
+export const LANGFUSE_TRACE_USER_ID_FIELDS = [
+  'id',
+  'email',
+  'username',
+  'name',
+  'openidId',
+  'samlId',
+  'ldapId',
+  'googleId',
+  'githubId',
+  'discordId',
+  'appleId',
+  'facebookId',
+] as const;
+export type LangfuseTraceUserIdField = (typeof LANGFUSE_TRACE_USER_ID_FIELDS)[number];
+
+/** User fields a deployment may copy into Langfuse trace metadata. */
+export const LANGFUSE_TRACE_USER_METADATA_FIELDS = [
+  ...LANGFUSE_TRACE_USER_ID_FIELDS,
+  'role',
+  'provider',
+] as const;
+export type LangfuseTraceUserMetadataField = (typeof LANGFUSE_TRACE_USER_METADATA_FIELDS)[number];
+
+/** Request fields a deployment may copy into Langfuse trace metadata. */
+export const LANGFUSE_TRACE_CONVERSATION_METADATA_FIELDS = [
+  'conversationId',
+  'endpoint',
+  'endpointType',
+  'provider',
+  'model',
+  'modelLabel',
+  'spec',
+] as const;
+export type LangfuseTraceConversationMetadataField =
+  (typeof LANGFUSE_TRACE_CONVERSATION_METADATA_FIELDS)[number];
+
+/**
+ * What a deployment attaches to every Langfuse trace beyond the defaults.
+ * Nothing here is exported unless explicitly listed, so the default trace
+ * carries only the internal user id and no user or request metadata.
+ */
+export const langfuseTraceConfigSchema = z.object({
+  /**
+   * Which user field becomes the trace `userId`. Defaults to the internal user
+   * id; a user with no value for the chosen field keeps the internal id.
+   */
+  userIdField: z.enum(LANGFUSE_TRACE_USER_ID_FIELDS).optional(),
+  /** User fields exported as `librechat.user.<field>` trace metadata. */
+  userMetadataFields: z.array(z.enum(LANGFUSE_TRACE_USER_METADATA_FIELDS)).optional(),
+  /**
+   * Request fields exported as trace metadata: `librechat.conversation.id`,
+   * `librechat.endpoint`, `librechat.endpoint.type`, `librechat.provider`,
+   * `librechat.model`, `librechat.model.label`, and `librechat.spec`.
+   */
+  conversationMetadataFields: z
+    .array(z.enum(LANGFUSE_TRACE_CONVERSATION_METADATA_FIELDS))
+    .optional(),
+});
+
+export type LangfuseTraceConfig = z.infer<typeof langfuseTraceConfigSchema>;
+
 export const langfuseConfigSchema = z.object({
   enabled: z.boolean().optional(),
   publicKey: z.string().optional(),
@@ -2453,6 +2666,8 @@ export const langfuseConfigSchema = z.object({
    * `Authorization` upstream regardless.
    */
   headers: z.record(z.string()).optional(),
+  /** Trace user identity and allowlisted user/request metadata. */
+  trace: langfuseTraceConfigSchema.optional(),
 });
 
 export type LangfuseConfig = z.infer<typeof langfuseConfigSchema>;
@@ -2475,6 +2690,48 @@ export const configSchema = z.object({
     .object({
       allowedDomains: z.array(z.string()).optional(),
       allowedAddresses: allowedAddressesSchema,
+      catalogRecovery: z
+        .object({
+          discoveryBackoffMs: z
+            .array(
+              z
+                .number()
+                .int()
+                .positive()
+                .max(24 * 60 * 60_000),
+            )
+            .min(1)
+            .max(8)
+            .default([5 * 60_000, 10 * 60_000, 20 * 60_000, 30 * 60_000]),
+          discoveryTimeoutMs: z
+            .number()
+            .int()
+            .positive()
+            .max(5 * 60_000)
+            .default(3_000),
+          reauthRetryMs: z
+            .number()
+            .int()
+            .positive()
+            .max(24 * 60 * 60_000)
+            .default(30 * 60_000),
+          maxStateEntries: z.number().int().positive().max(1_000_000).default(10_000),
+          generationReadTimeoutMs: z.number().int().positive().max(10_000).default(500),
+          authorizationFenceRetryMs: z
+            .array(z.number().int().nonnegative().max(60_000))
+            .min(1)
+            .max(8)
+            .default([0, 50, 200]),
+          authorizationFenceTimeoutMs: z.number().int().positive().max(30_000).default(1_000),
+          authorizationFenceRetryIntervalMs: z
+            .number()
+            .int()
+            .positive()
+            .max(60 * 60_000)
+            .default(30_000),
+          authorizationFenceRetryBatchSize: z.number().int().positive().max(10_000).default(100),
+        })
+        .default({}),
     })
     .optional(),
   interface: interfaceSchema,
@@ -2588,6 +2845,7 @@ export enum KnownEndpoints {
   groq = 'groq',
   helicone = 'helicone',
   huggingface = 'huggingface',
+  lemonade = 'lemonade',
   mistral = 'mistral',
   mlx = 'mlx',
   ollama = 'ollama',
@@ -2627,6 +2885,7 @@ export const alternateName = {
   [EModelEndpoint.anthropic]: 'Anthropic',
   [EModelEndpoint.custom]: 'Custom',
   [EModelEndpoint.bedrock]: 'AWS Bedrock',
+  [KnownEndpoints.lemonade]: 'AMD Lemonade',
   [KnownEndpoints.ollama]: 'Ollama',
   [KnownEndpoints.deepseek]: 'DeepSeek',
   [KnownEndpoints.moonshot]: 'Moonshot',
@@ -2634,6 +2893,15 @@ export const alternateName = {
   [KnownEndpoints.vercel]: 'Vercel',
   [KnownEndpoints.helicone]: 'Helicone',
 };
+
+/**
+ * Models the Assistants endpoints cannot run. GPT-6 Astra serves tool calls only
+ * from the Responses API, and the Assistants surface does not route through
+ * `getOpenAILLMConfig`, so listing it there would offer a configuration the
+ * provider rejects. Kept out of `sharedOpenAIModels`, which both Assistants
+ * catalogs consume.
+ */
+const responsesOnlyOpenAIModels = ['gpt-6-astra'];
 
 const sharedOpenAIModels = [
   'gpt-5.6',
@@ -2737,7 +3005,8 @@ export const bedrockModels = [
 export const defaultModels = {
   [EModelEndpoint.azureAssistants]: sharedOpenAIModels,
   [EModelEndpoint.assistants]: [...sharedOpenAIModels, 'chatgpt-4o-latest'],
-  [EModelEndpoint.agents]: sharedOpenAIModels, // TODO: Add agent models (agentsModels)
+  // TODO: Add agent models (agentsModels)
+  [EModelEndpoint.agents]: [...responsesOnlyOpenAIModels, ...sharedOpenAIModels],
   [EModelEndpoint.google]: [
     // Gemini 3.8 Models
     'gemini-3.8-flash',
@@ -2762,6 +3031,7 @@ export const defaultModels = {
   ],
   [EModelEndpoint.anthropic]: sharedAnthropicModels,
   [EModelEndpoint.openAI]: [
+    ...responsesOnlyOpenAIModels,
     ...sharedOpenAIModels,
     'chatgpt-4o-latest',
     'gpt-4-vision-preview',
@@ -2777,12 +3047,22 @@ const fitlerAssistantModels = (str: string) => {
 
 const openAIModels = defaultModels[EModelEndpoint.openAI];
 
+/**
+ * The OpenAI catalog without the models only the first-party OpenAI endpoint
+ * can run. Azure OpenAI shares this list, but Astra is neither routed to the
+ * Responses API nor given its request constraints there, and listing it first
+ * would let it become the default selection.
+ */
+const nonResponsesOnlyOpenAIModels = openAIModels.filter(
+  (model) => !responsesOnlyOpenAIModels.includes(model),
+);
+
 export const initialModelsConfig: TModelsConfig = {
   initial: [],
   [EModelEndpoint.openAI]: openAIModels,
   [EModelEndpoint.assistants]: openAIModels.filter(fitlerAssistantModels),
   [EModelEndpoint.agents]: openAIModels, // TODO: Add agent models (agentsModels)
-  [EModelEndpoint.azureOpenAI]: openAIModels,
+  [EModelEndpoint.azureOpenAI]: nonResponsesOnlyOpenAIModels,
   [EModelEndpoint.google]: defaultModels[EModelEndpoint.google],
   [EModelEndpoint.anthropic]: defaultModels[EModelEndpoint.anthropic],
   [EModelEndpoint.bedrock]: defaultModels[EModelEndpoint.bedrock],
@@ -3104,6 +3384,10 @@ export enum ViolationTypes {
    * Registration violations.
    */
   REGISTRATIONS = 'registrations',
+  /**
+   * Shared link retrieval limit violations.
+   */
+  SHARE_LIMIT = 'share_limit',
 }
 
 /**
@@ -3171,6 +3455,10 @@ export enum ErrorTypes {
    */
   STATEFUL_CODE_ENVIRONMENT_NOT_ALLOWED = 'stateful_code_environment_not_allowed',
   /**
+   * A conversation's selected attached workspace cannot be used as requested.
+   */
+  CODE_WORKSPACE_UNAVAILABLE = 'code_workspace_unavailable',
+  /**
    * Invalid Agent Provider (excluded by Admin)
    */
   INVALID_AGENT_PROVIDER = 'invalid_agent_provider',
@@ -3214,6 +3502,22 @@ export enum ErrorTypes {
    * Provider throttled or refused the request for exceeding a rate/spend allowance
    */
   MODEL_RATE_LIMIT = 'model_rate_limit',
+  /**
+   * Context pruning removed every message; nothing fits the configured context window
+   */
+  EMPTY_MESSAGES = 'empty_messages',
+  /**
+   * Formatted provider payload exceeded the context budget before invocation
+   */
+  FINAL_CONTEXT_OVERFLOW = 'final_context_overflow',
+  /**
+   * A manual compaction the graph could not attempt; `reason` says why
+   */
+  COMPACTION_SKIPPED = 'compaction_skipped',
+  /**
+   * A manual compaction whose summarizer produced nothing; history is untouched
+   */
+  COMPACTION_FAILED = 'compaction_failed',
 }
 
 /**

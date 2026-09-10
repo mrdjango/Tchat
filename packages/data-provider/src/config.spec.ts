@@ -20,6 +20,59 @@ const endpointsConfig: TEndpointsConfig = {
   Gemini: { type: EModelEndpoint.custom, userProvide: false, order: 9999 },
 };
 
+describe('scheduled MCP preflight config', () => {
+  it('bounds the separate readiness admission pool', () => {
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, admissionConcurrency: 100 } },
+      }).success,
+    ).toBe(true);
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, admissionConcurrency: 101 } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('caps per-admission connection concurrency', () => {
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, mcpPreflightConcurrency: 10 } },
+      }).success,
+    ).toBe(true);
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, mcpPreflightConcurrency: 11 } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('bounds the aggregate readiness timeout', () => {
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, mcpPreflightTimeoutMs: 600000 } },
+      }).success,
+    ).toBe(true);
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, mcpPreflightTimeoutMs: 600001 } },
+      }).success,
+    ).toBe(false);
+    expect(
+      configSchema.safeParse({
+        version: '1.2.1',
+        interface: { schedules: { use: true, mcpPreflightTimeoutMs: 999 } },
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('excludedKeys', () => {
   it.each([
     '_id',
@@ -27,6 +80,8 @@ describe('excludedKeys', () => {
     'conversationId',
     'agentEventBinding',
     'agentEventActor',
+    'agentEventActorCleanup',
+    'agentEventActorSuspension',
     'agentEventActorReconciliations',
     '__v',
   ])('excludes system field "%s"', (field) => {
@@ -66,6 +121,155 @@ describe('bedrockEndpointSchema', () => {
   });
 });
 
+describe('Agent Management authentication config', () => {
+  const binding = {
+    clientId: 'machine-client',
+    userId: '507f1f77bcf86cd799439011',
+    tenantId: 'tenant-a',
+  };
+
+  it('accepts an enabled OIDC configuration with a client binding', () => {
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {
+                enabled: true,
+                issuer: 'https://issuer.example.com',
+                audience: 'https://agents.example.com',
+              },
+              clients: [binding],
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.data.endpoints?.agents?.managementApi?.auth?.clients).toEqual([
+      { ...binding, enabled: true },
+    ]);
+  });
+
+  it('accepts a provider-specific token subject in a client binding', () => {
+    const subject = 'opaque-service-principal-subject';
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {},
+              clients: [{ ...binding, subject }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.endpoints?.agents?.managementApi?.auth?.clients[0].subject).toBe(subject);
+  });
+
+  it('normalizes binding User ObjectIds', () => {
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {},
+              clients: [{ ...binding, userId: binding.userId.toUpperCase() }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.endpoints?.agents?.managementApi?.auth?.clients[0].userId).toBe(
+      binding.userId,
+    );
+  });
+
+  it('rejects enabled auth without a client binding', () => {
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {
+                enabled: true,
+                issuer: 'https://issuer.example.com',
+                audience: 'https://agents.example.com',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it.each([
+    ['duplicate client IDs', [binding, { ...binding, tenantId: 'tenant-b' }]],
+    ['an invalid user ID', [{ ...binding, userId: 'not-an-object-id' }]],
+    ['an invalid tenant ID', [{ ...binding, tenantId: '-tenant' }]],
+    ['the system tenant', [{ ...binding, tenantId: '__SYSTEM__' }]],
+    ['an empty token subject', [{ ...binding, subject: '  ' }]],
+  ])('rejects %s', (_label, clients) => {
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {},
+              clients,
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects remote-execution scopes and unknown management auth fields', () => {
+    const makeConfig = (auth: Record<string, unknown>) => ({
+      version: '1.0',
+      endpoints: { agents: { managementApi: { auth } } },
+    });
+
+    expect(
+      configSchema.safeParse(
+        makeConfig({
+          oidc: { scope: 'remote_agent' },
+          clients: [binding],
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      configSchema.safeParse(
+        makeConfig({
+          oidc: {},
+          clients: [binding],
+          apiKey: { enabled: true },
+        }),
+      ).success,
+    ).toBe(false);
+  });
+});
+
 describe('attached code environment user config schema', () => {
   it('accepts typed permission controls exposed by the administrator', () => {
     const result = configSchema.safeParse({
@@ -86,6 +290,7 @@ describe('attached code environment user config schema', () => {
                     fileWrite: { allowed: ['allow', 'ask', 'deny'], default: 'ask' },
                     commandExecution: { allowed: ['ask', 'deny'], default: 'ask' },
                   },
+                  limits: { maxCommandTimeoutMs: 120000 },
                 },
               },
             ],
@@ -98,6 +303,30 @@ describe('attached code environment user config schema', () => {
       throw new Error(result.error.toString());
     }
     expect(result.success).toBe(true);
+  });
+
+  it('rejects an attached command timeout above the protocol hard cap', () => {
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: {
+        agents: {
+          statefulCodeSessions: {
+            allowedEnvironments: ['user'],
+            environments: [
+              {
+                id: 'personal-vm',
+                name: 'Personal VM',
+                type: 'attached',
+                baseURL: 'https://code.example.com/v1',
+                configSchema: { limits: { maxCommandTimeoutMs: 300001 } },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
   });
 
   it('rejects a permission default the administrator did not expose', () => {
@@ -196,7 +425,10 @@ describe('agent background task config', () => {
     if (!result.success) {
       return;
     }
-    expect(result.data.endpoints?.agents?.backgroundTasks).toEqual({ completionWakeups: true });
+    expect(result.data.endpoints?.agents?.backgroundTasks).toEqual({
+      completionWakeups: true,
+      ordinaryToolCancellation: false,
+    });
   });
 
   it('accepts an administrator poll-only policy', () => {
@@ -209,7 +441,26 @@ describe('agent background task config', () => {
     if (!result.success) {
       return;
     }
-    expect(result.data.endpoints?.agents?.backgroundTasks).toEqual({ completionWakeups: false });
+    expect(result.data.endpoints?.agents?.backgroundTasks).toEqual({
+      completionWakeups: false,
+      ordinaryToolCancellation: false,
+    });
+  });
+
+  it('accepts administrator-enabled ordinary tool cancellation', () => {
+    const result = configSchema.safeParse({
+      version: '1.0',
+      endpoints: { agents: { backgroundTasks: { ordinaryToolCancellation: true } } },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.data.endpoints?.agents?.backgroundTasks).toEqual({
+      completionWakeups: true,
+      ordinaryToolCancellation: true,
+    });
   });
 });
 
@@ -666,6 +917,58 @@ describe('allowedAddressesSchema', () => {
       expect(result.success).toBe(true);
     });
 
+    it('defaults and validates MCP catalog recovery controls', () => {
+      const defaults = configSchema.parse({ version: '1.0', mcpSettings: {} });
+      expect(defaults.mcpSettings?.catalogRecovery).toEqual({
+        discoveryBackoffMs: [300_000, 600_000, 1_200_000, 1_800_000],
+        discoveryTimeoutMs: 3_000,
+        reauthRetryMs: 1_800_000,
+        maxStateEntries: 10_000,
+        generationReadTimeoutMs: 500,
+        authorizationFenceRetryMs: [0, 50, 200],
+        authorizationFenceTimeoutMs: 1_000,
+        authorizationFenceRetryIntervalMs: 30_000,
+        authorizationFenceRetryBatchSize: 100,
+      });
+
+      expect(
+        configSchema.safeParse({
+          version: '1.0',
+          mcpSettings: { catalogRecovery: { discoveryBackoffMs: [] } },
+        }).success,
+      ).toBe(false);
+      expect(
+        configSchema.safeParse({
+          version: '1.0',
+          mcpSettings: { catalogRecovery: { discoveryTimeoutMs: 0 } },
+        }).success,
+      ).toBe(false);
+      expect(
+        configSchema.safeParse({
+          version: '1.0',
+          mcpSettings: { catalogRecovery: { authorizationFenceRetryMs: [-1] } },
+        }).success,
+      ).toBe(false);
+      expect(
+        configSchema.safeParse({
+          version: '1.0',
+          mcpSettings: { catalogRecovery: { authorizationFenceTimeoutMs: 0 } },
+        }).success,
+      ).toBe(false);
+      expect(
+        configSchema.safeParse({
+          version: '1.0',
+          mcpSettings: { catalogRecovery: { authorizationFenceRetryIntervalMs: 0 } },
+        }).success,
+      ).toBe(false);
+      expect(
+        configSchema.safeParse({
+          version: '1.0',
+          mcpSettings: { catalogRecovery: { authorizationFenceRetryBatchSize: 0 } },
+        }).success,
+      ).toBe(false);
+    });
+
     it('accepts the field on actions', () => {
       const result = configSchema.safeParse({
         version: '1.0',
@@ -1001,5 +1304,27 @@ describe('bedrockModels defaults', () => {
   it('keeps Opus 5 available as a global profile', () => {
     expect(bedrockModels).toContain('global.anthropic.claude-opus-5');
     expect(bedrockModels).not.toContain('anthropic.claude-opus-5');
+  });
+});
+
+describe('MCP UI refresh configuration', () => {
+  it('preserves configured intervals, including zero to disable polling', () => {
+    const result = configSchema.parse({
+      version: '1.3.5',
+      interface: { mcpServers: { toolsRefreshInterval: 0, statusRefreshInterval: 60_000 } },
+    });
+    expect(result.interface?.mcpServers).toMatchObject({
+      toolsRefreshInterval: 0,
+      statusRefreshInterval: 60_000,
+    });
+  });
+
+  it.each([-1, 1.5, 2_147_483_648])('rejects invalid timer intervals: %s', (interval) => {
+    expect(
+      configSchema.safeParse({
+        version: '1.3.5',
+        interface: { mcpServers: { statusRefreshInterval: interval } },
+      }).success,
+    ).toBe(false);
   });
 });

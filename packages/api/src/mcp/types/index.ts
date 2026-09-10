@@ -11,6 +11,7 @@ import {
 import type {
   EmbeddedResource,
   ListToolsResult,
+  ResourceLink,
   ImageContent,
   AudioContent,
   TextContent,
@@ -27,7 +28,7 @@ import type { RequestBody } from '~/types/http';
 import type * as o from '~/mcp/oauth/types';
 
 export type MCPRuntimeRequestBody = Required<Pick<RequestBody, 'messageId' | 'conversationId'>> &
-  Pick<RequestBody, 'parentMessageId'>;
+  Pick<RequestBody, 'parentMessageId' | 'codeWorkspaces'>;
 
 export type StdioOptions = z.infer<typeof StdioOptionsSchema>;
 export type WebSocketOptions = z.infer<typeof WebSocketOptionsSchema>;
@@ -73,8 +74,19 @@ export type OAuthHandledSource = 'silent-refresh' | 'interactive';
 
 export type MCPTool = Tool;
 export type MCPToolListResponse = ListToolsResult;
-export type ToolContentPart = TextContent | ImageContent | EmbeddedResource | AudioContent;
-export type { TextContent, ImageContent, EmbeddedResource, AudioContent };
+export type ToolContentPart =
+  | TextContent
+  | ImageContent
+  | EmbeddedResource
+  | ResourceLink
+  | AudioContent;
+export type ResourceContents = EmbeddedResource['resource'];
+export type ResourceBody = {
+  text?: string;
+  image?: ImageContent;
+  binaryBytes?: number;
+};
+export type { TextContent, ImageContent, EmbeddedResource, ResourceLink, AudioContent };
 export type MCPToolCallResponse =
   | undefined
   | {
@@ -204,9 +216,22 @@ export type AddServerResult = {
   config: ParsedServerConfig;
 };
 
+/** Mutable per-creation budget shared by every direct-bearer recovery layer. */
+export interface DirectBearerRecoveryState {
+  attempted: boolean;
+  /** Request-local credential snapshot shared with checkout joiners and the first tool call. */
+  resolvedConfig?: MCPOptions;
+}
+
 export interface BasicConnectionOptions {
   serverName: string;
   serverConfig: MCPOptions;
+  /** Original unresolved definition retained across asynchronous credential preprocessing. */
+  serverDefinition?: MCPOptions;
+  /** Original trusted definition retained when serverConfig already contains request-resolved credentials. */
+  directBearerSourceConfig?: ParsedServerConfig;
+  /** Internal one-shot fence shared with the connection owner. */
+  directBearerRecoveryState?: DirectBearerRecoveryState;
   useSSRFProtection?: boolean;
   allowedDomains?: string[] | null;
   /** Admin exemption list of host:port pairs that bypass the SSRF private-IP block */
@@ -226,6 +251,8 @@ export interface UserConnectionContext {
   requestBody?: RequestBody;
   requestScopedConnections?: RequestScopedMCPConnectionStore;
   graphTokenResolver?: GraphTokenResolver;
+  /** Live OpenID session credential source for trusted direct bearer and OBO configurations. */
+  upstreamTokenProvider?: UpstreamTokenProvider;
   connectionTimeout?: number;
   /** Cancels the connection's SDK requests when the caller itself is cancelled; previously only
    *  OAuth connections could carry a signal, leaving non-OAuth discovery uncancellable. */
@@ -234,12 +261,21 @@ export interface UserConnectionContext {
    *  only a single `connect()`, so a caller that must return within a fixed budget sets this to
    *  cap every segment, including `tools/list` pagination and the unauthenticated fallback. */
   deadlineMs?: number;
+  /** Advances application authorization state after OAuth token persistence succeeds. */
+  onOAuthCredentialsChanged?: (scope: { userId: string; serverName: string }) => Promise<void>;
+  /** Persists authorization-fence intent before OAuth token rows change and returns its publisher. */
+  onOAuthCredentialsChanging?: (scope: {
+    userId: string;
+    serverName: string;
+  }) => Promise<() => Promise<void>>;
 }
 
 export interface RequestScopedMCPConnectionStore {
   connections: Map<string, unknown>;
   pending: Map<string, Promise<unknown>>;
   disposeConnection?: (connectionKey: string, connection: unknown) => Promise<void>;
+  /** Set before cleanup snapshots pending work; new connection attempts must fail closed. */
+  cleanupStarted?: boolean;
 }
 
 export interface OAuthStartOptions {
@@ -258,7 +294,6 @@ export interface OAuthConnectionOptions extends UserConnectionContext {
   returnOnOAuth?: boolean;
   oboTokenResolver?: OboTokenResolver;
   oboTrustChecker?: OboTrustChecker;
-  upstreamTokenProvider?: UpstreamTokenProvider;
   oboIdentityContext?: AuthIdentityContext;
 }
 
@@ -268,7 +303,11 @@ export interface UserMCPConnectionOptions extends UserConnectionContext {
   forceNew?: boolean;
   ephemeralConnection?: boolean;
   serverConfig?: ParsedServerConfig;
+  /** Internal one-shot fence shared across connection initialization and initial tools/list. */
+  directBearerRecoveryState?: DirectBearerRecoveryState;
   flowManager?: FlowStateManager<o.MCPOAuthTokens | null>;
+  /** Request-local resolved credentials; serverConfig remains the authoritative definition. */
+  directBearerResolvedConfig?: MCPOptions;
   tokenMethods?: TokenMethods;
   signal?: AbortSignal;
   oauthStart?: OAuthStartHandler;
@@ -276,7 +315,6 @@ export interface UserMCPConnectionOptions extends UserConnectionContext {
   returnOnOAuth?: boolean;
   oboTokenResolver?: OboTokenResolver;
   oboTrustChecker?: OboTrustChecker;
-  upstreamTokenProvider?: UpstreamTokenProvider;
   oboIdentityContext?: AuthIdentityContext;
 }
 
@@ -293,6 +331,8 @@ export interface ToolDiscoveryOptions {
   connectionTimeout?: number;
   /** Absolute epoch-ms bound on the whole discovery operation; see `UserConnectionContext`. */
   deadlineMs?: number;
+  onOAuthCredentialsChanged?: (scope: { userId: string; serverName: string }) => Promise<void>;
+  onOAuthCredentialsChanging?: UserConnectionContext['onOAuthCredentialsChanging'];
   /** Pre-resolved config-source servers for tenant-scoped lookup */
   configServers?: Record<string, ParsedServerConfig>;
   oboTokenResolver?: OboTokenResolver;
@@ -305,4 +345,5 @@ export interface ToolDiscoveryResult {
   tools: Tool[] | null;
   oauthRequired: boolean;
   oauthUrl: string | null;
+  authenticationKind?: 'oauth' | 'obo' | 'server';
 }

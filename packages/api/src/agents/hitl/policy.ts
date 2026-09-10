@@ -56,15 +56,20 @@ export interface ToolApprovalPolicyLayers {
  *   - `agent` overrides `mode`/`allow`/`deny`/`ask`/`reason`;
  *   - `skills` may only tighten (add `ask`/`deny`), never loosen.
  *
- * The BYOM activation adds only `enabled: true, mode: 'bypass'`; an agent-scoped
- * hook supplies the risky coding decisions. This avoids prompting managed sibling
- * agents in the same graph. An explicit endpoint `enabled: false` remains the
- * administrator emergency override. `agent`/`skills` are accepted but not yet merged.
+ * When no endpoint policy is active, BYOM adds `enabled: true, mode: 'bypass'` and
+ * an agent-scoped hook supplies its coding decisions. An already-enabled endpoint
+ * policy remains the run-wide administrative baseline, including its unmatched-tool
+ * mode. An explicit endpoint `enabled: false` remains the administrator emergency
+ * override. `agent`/`skills` are accepted but not yet merged.
  */
 export function resolveToolApprovalPolicy(
   layers: ToolApprovalPolicyLayers,
 ): TToolApprovalPolicy | undefined {
-  if (layers.attachedCodeEnvironment === true && layers.endpoint?.enabled !== false) {
+  if (
+    layers.attachedCodeEnvironment === true &&
+    layers.endpoint?.enabled !== true &&
+    layers.endpoint?.enabled !== false
+  ) {
     return {
       ...layers.endpoint,
       enabled: true,
@@ -341,6 +346,8 @@ export interface PendingActionContext {
   requestFingerprint?: string;
   /** Graph-determining fields to replay on resume; see {@link RESUME_CONTEXT_KEYS}. */
   resumeContext?: Record<string, unknown>;
+  /** Opaque server-only binding to the stateful code targets selected at pause time. */
+  codeExecutionBinding?: Agents.CodeExecutionApprovalBinding;
 }
 
 /** Request fields that decide which agent/graph + tool set a turn runs. */
@@ -353,6 +360,8 @@ export interface AgentRequestFingerprintFields {
   /** Ephemeral agents derive their system instructions from this; pin it too. */
   promptPrefix?: string | null;
   ephemeralAgent?: Record<string, unknown> | null;
+  codeApprovalMode?: string | null;
+  codeWorkspaces?: unknown;
 }
 
 /** Stable, order-independent serialization of the ephemeral capability config. */
@@ -390,6 +399,11 @@ export const RESUME_CONTEXT_KEYS = [
   'model',
   'promptPrefix',
   'ephemeralAgent',
+  'codeApprovalMode',
+  // The selected attached workspace determines the code tools' execution root and
+  // operation ceiling. Pin it across every pause type so a reload or crafted resume
+  // cannot rebuild the graph against a different directory.
+  'codeWorkspaces',
   // The agents build reads addedConvo into endpointOption to add parallel/secondary
   // agents; the resume POST can't reconstruct it, so replay it from the paused request.
   'addedConvo',
@@ -724,6 +738,12 @@ export function computeAgentRequestFingerprint(fields: AgentRequestFingerprintFi
     spec: fields.spec ?? null,
     promptPrefix: fields.promptPrefix ?? null,
     ephemeralAgent: normalizeEphemeralAgent(fields.ephemeralAgent),
+    ...(Object.prototype.hasOwnProperty.call(fields, 'codeApprovalMode')
+      ? { codeApprovalMode: fields.codeApprovalMode ?? null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(fields, 'codeWorkspaces')
+      ? { codeWorkspaces: fields.codeWorkspaces ?? null }
+      : {}),
   });
   return createHash('sha256').update(canonical).digest('hex');
 }
@@ -772,11 +792,13 @@ export function buildPendingAction(
     threadId: ctx.threadId,
     requestFingerprint: ctx.requestFingerprint,
     resumeContext: ctx.resumeContext,
+    codeExecutionBinding: ctx.codeExecutionBinding,
   };
 }
 
 /**
- * Client-facing projection of a pending action. `requestFingerprint` and `resumeContext`
+ * Client-facing projection of a pending action. `requestFingerprint`, `resumeContext`, and
+ * `codeExecutionBinding`
  * are server-only replay state — `resumeContext` in particular carries the resolved
  * model parameters — so every copy that leaves the server (SSE, status, resume state)
  * must go through this. The full record stays in the job store for the resume route.
@@ -790,6 +812,7 @@ export function toClientPendingAction(
   const {
     requestFingerprint: _requestFingerprint,
     resumeContext: _resumeContext,
+    codeExecutionBinding: _codeExecutionBinding,
     ...clientSafe
   } = pendingAction;
   return clientSafe;

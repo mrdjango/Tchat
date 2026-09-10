@@ -88,6 +88,7 @@ describe('loadMCPServerCatalogs', () => {
       await deps.getServerToolFunctionsSnapshot(user.id, 'config-only', servers[0].serverConfig, {
         deadlineMs: 123,
       });
+      await deps.getRecoveryGeneration({ userId: user.id, serverName: 'config-only' });
       await deps.cacheServerTools({ serverName: 'config-only' });
       return { serverTools: new Map([['config-only', {}]]), serversWithoutTools: [] };
     });
@@ -102,6 +103,10 @@ describe('loadMCPServerCatalogs', () => {
     });
 
     expect(mockGetUserMCPAuthMap).toHaveBeenCalledTimes(1);
+    expect(mockGetMCPToolsCacheGeneration).toHaveBeenCalledWith({
+      userId: user.id,
+      serverName: 'config-only',
+    });
     expect(mockGetUserMCPAuthMap).toHaveBeenCalledWith({
       userId: user.id,
       servers: ['config-only', 'user-server'],
@@ -437,6 +442,27 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
     });
 
     expect(mockGetConnection).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('reinitMCPServer — direct bearer authentication outcomes', () => {
+  it('preserves a typed rejection instead of reducing it to a generic result', async () => {
+    const { MCPAuthenticationRejectedError } = require('@librechat/api');
+    const rejection = new MCPAuthenticationRejectedError('private-mcp', false);
+    mockGetConnection.mockRejectedValue(rejection);
+
+    await expect(
+      reinitMCPServer({
+        user: { id: 'user-123' },
+        serverName: 'private-mcp',
+        serverConfig: {
+          type: 'streamable-http',
+          url: 'https://mcp.example.com',
+          source: 'yaml',
+          headers: { Authorization: 'Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}' },
+        },
+      }),
+    ).rejects.toBe(rejection);
   });
 });
 

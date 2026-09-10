@@ -3,3 +3,7 @@ export * from './http';
 export * from './config';
 export * from './bridge';
 export * from './lifecycle';
+export * from './workspace';
+export * from './command';
+export * from './capabilities';
+export * from './errors';
