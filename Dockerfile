@@ -24,6 +24,10 @@ WORKDIR /app
 
 USER node
 
+# `reova`, a postinstall dependency of @librechat/agents, reports each install to
+# telemetry.reo.dev unless DO_NOT_TRACK is set. ARG scopes the opt-out to the build.
+ARG DO_NOT_TRACK=1
+
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node api/package.json ./api/package.json
 COPY --chown=node:node client/package.json ./client/package.json
