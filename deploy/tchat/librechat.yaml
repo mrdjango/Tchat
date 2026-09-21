@@ -107,7 +107,10 @@ endpoints:
       # broker accepts alongside bearer tokens.
       provider: 'anthropic'
       apiKey: '${TCHAT_BROKER_SHARED_KEY}'
-      baseURL: '${TCHAT_BROKER_BASE_URL}'
+      # No /v1 here, unlike the OpenAI endpoint above: the Anthropic SDK appends
+      # /v1/messages to the base URL, so TCHAT_BROKER_BASE_URL would produce
+      # /v1/v1/messages and every Claude request would 404 at the broker.
+      baseURL: '${TCHAT_BROKER_ORIGIN}'
       headers:
         anthropic-version: '2023-06-01'
         X-Tchat-User-Id: '{{LIBRECHAT_USER_ID}}'

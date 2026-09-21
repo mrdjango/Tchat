@@ -90,7 +90,7 @@ services:
       DOPPLER_TOKEN: ${DOPPLER_TOKEN:?set the tchat-be-fe service token in the Komodo stack environment}
       DOPPLER_PROJECT: ${DOPPLER_PROJECT:-tchat-be-fe}
       DOPPLER_CONFIG: ${DOPPLER_CONFIG:-prd}
-      DOPPLER_PRESERVE_ENV: HOST,PORT,NODE_ENV,TRUST_PROXY,MONGO_URI,MEILI_HOST,RAG_API_URL,RAG_PORT,CONFIG_PATH,LIBRECHAT_TEMP_CREDENTIALS_PATH,TCHAT_BROKER_BASE_URL,NO_PROXY,no_proxy
+      DOPPLER_PRESERVE_ENV: HOST,PORT,NODE_ENV,TRUST_PROXY,MONGO_URI,MEILI_HOST,RAG_API_URL,RAG_PORT,CONFIG_PATH,LIBRECHAT_TEMP_CREDENTIALS_PATH,TCHAT_BROKER_BASE_URL,TCHAT_BROKER_ORIGIN,NO_PROXY,no_proxy
       HOST: 0.0.0.0
       PORT: "3080"
       NODE_ENV: production
@@ -106,6 +106,11 @@ services:
       LIBRECHAT_TEMP_CREDENTIALS_PATH: /app/data/.env.temp
       # The only model destination Tchat knows about.
       TCHAT_BROKER_BASE_URL: http://tchat-broker:8081/v1
+      # The same broker without the /v1 suffix, for the TensorGrid-Claude endpoint.
+      # The Anthropic SDK appends /v1/messages to its base URL itself, so a base
+      # that already ends in /v1 sends every request to /v1/v1/messages, which the
+      # broker refuses with 404 - surfaced in Tchat as "model unavailable".
+      TCHAT_BROKER_ORIGIN: http://tchat-broker:8081
       NO_PROXY: localhost,127.0.0.1,::1,tchat-mongo,tchat-meili,tchat-broker,tchat-rag,tchat-vectordb
       no_proxy: localhost,127.0.0.1,::1,tchat-mongo,tchat-meili,tchat-broker,tchat-rag,tchat-vectordb
     volumes:
