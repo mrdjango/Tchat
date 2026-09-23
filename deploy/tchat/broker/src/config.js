@@ -30,4 +30,14 @@ export const loadConfig = () => ({
   subjectCacheSeconds: Number(optional('TCHAT_BROKER_SUBJECT_CACHE_SECONDS', '900')),
   tokenCacheSeconds: Number(optional('TCHAT_BROKER_TOKEN_CACHE_SECONDS', '3600')),
   requestTimeoutMs: Number(optional('TCHAT_BROKER_REQUEST_TIMEOUT_MS', '15000')),
+  /** Tchat's web search and web fetch backend. Unset, those routes answer 503
+   *  and inference is unaffected. */
+  tinyfishApiKey: optional('TINYFISH_API_KEY', ''),
+  tinyfishSearchUrl: trimSlash(optional('TINYFISH_SEARCH_URL', 'https://api.search.tinyfish.ai')),
+  tinyfishFetchUrl: trimSlash(optional('TINYFISH_FETCH_URL', 'https://api.fetch.tinyfish.ai')),
+  /** Whole-call budget for one TinyFish request. A Fetch of a JS-heavy page
+   *  can take tens of seconds, so this is longer than the inference default. */
+  tinyfishTimeoutMs: Number(optional('TINYFISH_TIMEOUT_MS', '60000')),
+  /** Per-page cap on fetched Markdown handed to the model. */
+  tinyfishFetchMaxChars: Number(optional('TINYFISH_FETCH_MAX_CHARS', '40000')),
 });

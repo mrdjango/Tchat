@@ -82,6 +82,28 @@ Point it anywhere else and the headers are withheld — the user's email is neve
 sent to a third-party provider — and the broker refuses the call as
 `identity_missing`.
 
+## Web search and web fetch
+
+Every chat, on every model, gets two tools users cannot switch off or
+reconfigure. Both are backed by [TinyFish](https://docs.tinyfish.ai), and both
+reach it only through the broker, which holds `TINYFISH_API_KEY`:
+
+- **`web_search`** is LibreChat's own search tool, with citations. LibreChat has
+  no TinyFish provider, so `librechat.yaml` selects the Tavily provider and
+  points its URLs at the broker's `/tinyfish/tavily/search` and `/extract`,
+  which translate to TinyFish Search and Fetch. `webSearch.alwaysOn` (a fork
+  option) equips it on every chat and hides the toggle.
+- **`web_fetch`** reads a URL the user gives, which the search tool cannot do.
+  The broker serves it as a one-tool MCP server at `/tinyfish/mcp`;
+  `mcpServers.web-fetch` has the fork option `alwaysOn: true` plus
+  `chatMenu: false`. It is best-effort: if the broker cannot list the tool, the
+  chat goes ahead without it rather than failing.
+
+These calls are not billed to the user's TensorGrid credit. Search is free on
+TinyFish; Fetch draws on the TinyFish wallet. One key serves every user, so the
+per-key rate limit (search: 30 requests/minute by default) is shared, and a
+busy minute surfaces as a failed search rather than a failed chat.
+
 ## Files
 
 | Path | Purpose |
@@ -91,7 +113,7 @@ sent to a third-party provider — and the broker refuses the call as
 | `nginx.conf` | Branding overrides + reverse proxy to `tchat-api`. |
 | `branding/` | Logo, favicons, PWA manifest served in place of LibreChat's. |
 | `Dockerfile.api` | This fork's LibreChat image + Doppler CLI + `librechat.yaml`. |
-| `broker/` | The gateway token broker (Node, no runtime dependencies). |
+| `broker/` | The gateway token broker (Node, no runtime dependencies). Also serves web search and fetch (`src/tinyfish.js`). |
 | `entrypoint.sh` | Shared `doppler run` wrapper for both images. |
 | `env.example` | Every variable, and which system owns it. |
 | `OIDC.md` | How Django becomes the identity provider. |

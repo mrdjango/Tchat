@@ -236,7 +236,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     });
   }
 
-  if (canUseWebSearch && webSearchEnabled) {
+  if (canUseWebSearch && webSearchEnabled && startupConfig?.webSearch?.alwaysOn !== true) {
     dropdownItems.push({
       onClick: handleWebSearchToggle,
       hideOnClick: false,

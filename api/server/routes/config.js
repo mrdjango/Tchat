@@ -178,11 +178,12 @@ function buildWebSearchConfig(appConfig) {
   if (!ws) {
     return undefined;
   }
-  const { searchProvider, scraperProvider, rerankerType } = ws;
-  if (!searchProvider && !scraperProvider && !rerankerType) {
+  const { searchProvider, scraperProvider, rerankerType, alwaysOn } = ws;
+  if (!searchProvider && !scraperProvider && !rerankerType && alwaysOn !== true) {
     return undefined;
   }
   return {
+    ...(alwaysOn === true && { alwaysOn }),
     ...(searchProvider && { searchProvider }),
     ...(scraperProvider && { scraperProvider }),
     ...(rerankerType && { rerankerType }),

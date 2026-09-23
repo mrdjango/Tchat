@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { Globe } from 'lucide-react';
 import { CheckboxButton } from '@librechat/client';
 import { Permissions, PermissionTypes } from 'librechat-data-provider';
+import { useGetStartupConfig } from '~/data-provider';
 import { useLocalize, useHasAccess } from '~/hooks';
 import { useBadgeRowContext } from '~/Providers';
 import { badgeAccents } from './accents';
@@ -13,7 +14,8 @@ function WebSearch() {
     permission: Permissions.USE,
   });
   const context = useBadgeRowContext();
-  if (!canUseWebSearch) {
+  const { data: startupConfig } = useGetStartupConfig();
+  if (!canUseWebSearch || startupConfig?.webSearch?.alwaysOn === true) {
     return null;
   }
   if (!context) {
