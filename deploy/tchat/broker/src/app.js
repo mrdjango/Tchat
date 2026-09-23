@@ -2,6 +2,7 @@ import { BrokerError, noIdentity, unauthorized, upstreamUnavailable } from './er
 import { invalidateToken, resolveToken } from './tokens.js';
 import { resolveSubject } from './identity.js';
 import { secretsMatch } from './signing.js';
+import { TINYFISH_PREFIX, createTinyfish } from './tinyfish.js';
 
 /** Paths the chat app is allowed to reach. Everything else is refused here
  *  rather than forwarded, so the broker can never be used as an open relay.
@@ -72,6 +73,8 @@ const jsonResponse = (status, body) =>
   });
 
 export const createApp = ({ config, cache, fetchImpl = fetch, logger = console }) => {
+  const tinyfish = createTinyfish({ config, fetchImpl });
+
   const relay = async (request, url, token, bodyBytes) => {
     const upstream = new URL(url.pathname + url.search, config.upstreamBaseUrl);
     return fetchImpl(upstream, {
@@ -94,6 +97,11 @@ export const createApp = ({ config, cache, fetchImpl = fetch, logger = console }
     try {
       if (!secretsMatch(ingressKey(request.headers), config.sharedKey)) {
         throw unauthorized();
+      }
+      // Web search and fetch bill to Tchat's own TinyFish key, not to the
+      // user, so they need no identity and never touch the Gateway.
+      if (url.pathname.startsWith(TINYFISH_PREFIX)) {
+        return await tinyfish(request, url);
       }
       if (!RELAY_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
         throw new BrokerError({

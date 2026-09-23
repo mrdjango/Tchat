@@ -28,6 +28,7 @@ import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
 import { getCustomEndpointConfig } from '~/app/config';
 import { resolveImageSpec } from '~/images/specs';
+import { getPinnedTools } from '~/agents/pinned';
 
 const { mcp_all, mcp_delimiter } = Constants;
 type ModelParametersWithPromptPrefix = AgentModelParameters & { promptPrefix?: string | null };
@@ -95,6 +96,12 @@ export async function loadEphemeralAgent(
       mcpServers.add(mcpServer);
     }
   }
+  const pinned = getPinnedTools(req.config);
+  /** Pinned servers nobody selected are best-effort; see `getPinnedTools`. */
+  const optionalServers = new Set(pinned.mcpServers.filter((name) => !mcpServers.has(name)));
+  for (const mcpServer of optionalServers) {
+    mcpServers.add(mcpServer);
+  }
   /** Publish the servers this request will actually use back onto the body. The
    *  instruction path reads `req.body.ephemeralAgent.mcp` directly and prefers
    *  it over the agent's tools, so it would otherwise both inject a hidden
@@ -109,7 +116,7 @@ export async function loadEphemeralAgent(
   if (ephemeralAgent?.file_search === true || modelSpec?.fileSearch === true) {
     tools.push(Tools.file_search);
   }
-  if (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true) {
+  if (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true || pinned.webSearch) {
     tools.push(Tools.web_search);
   }
   if (ephemeralAgent?.memory === true || modelSpec?.memory === true) {
@@ -147,6 +154,10 @@ export async function loadEphemeralAgent(
         overlayConfig && requiresEphemeralUserConnection(overlayConfig)
           ? null
           : await deps.getMCPServerTools(userId, mcpServer, overlayConfig);
+      if (!serverTools && optionalServers.has(mcpServer)) {
+        logger.warn(`[loadEphemeralAgent] Skipping pinned MCP server "${mcpServer}": no tools`);
+        continue;
+      }
       if (!serverTools) {
         tools.push(`${mcp_all}${mcp_delimiter}${mcpServer}`);
         addedServers.add(mcpServer);

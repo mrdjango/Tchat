@@ -195,6 +195,13 @@ const BaseOptionsSchema = z.object({
    */
   chatMenu: z.boolean().optional(),
   /**
+   * Equip this server's tools on every chat, like a model spec's `mcpServers`
+   * but for any model. Best-effort: a chat whose request cannot resolve the
+   * server's tools goes ahead without them. Pair with `chatMenu: false` so the
+   * picker does not offer a toggle that has no effect.
+   */
+  alwaysOn: z.boolean().optional(),
+  /**
    * Controls server instruction behavior:
    * - undefined/not set: No instructions included (default)
    * - true: Use server-provided instructions

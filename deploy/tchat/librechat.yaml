@@ -30,6 +30,9 @@ interface:
   multiConvo: true
   fileSearch: true
   fileCitations: true
+  # Grants every role the web search permission. The tool itself is pinned on
+  # by `webSearch.alwaysOn` below, so there is no toggle for users to flip.
+  webSearch: true
   feedback: true
   prompts:
     use: true
@@ -45,6 +48,55 @@ interface:
   # through the TensorGrid endpoints below.
   marketplace:
     use: false
+
+# Web search, backed by TinyFish (docs.tinyfish.ai) through the broker.
+#
+# LibreChat has no TinyFish provider, so the broker speaks Tavily's API on
+# /tinyfish/tavily/* and translates each call to TinyFish Search and Fetch. The
+# TinyFish key lives only in the broker (TINYFISH_API_KEY); this side presents
+# the same shared ingress key it uses for inference. Every setting is pinned
+# here, so users get no provider picker and no API-key dialog, and `alwaysOn`
+# equips the tool on every chat, whatever the model, with the toggle hidden.
+webSearch:
+  alwaysOn: true
+  searchProvider: 'tavily'
+  scraperProvider: 'tavily'
+  # Search results arrive ranked; a reranker would be a third provider and key.
+  rerankerType: 'none'
+  tavilyApiKey: '${TCHAT_BROKER_SHARED_KEY}'
+  # TAVILY_SEARCH_URL / TAVILY_EXTRACT_URL point at the broker; they are set in
+  # compose.production.yml, next to the service they name.
+  tavilySearchUrl: '${TAVILY_SEARCH_URL}'
+  tavilyExtractUrl: '${TAVILY_EXTRACT_URL}'
+  # The broker is a private address, which the web-search SSRF guard refuses
+  # unless it is named here.
+  allowedAddresses:
+    - 'tchat-broker:8081'
+
+# `web_fetch`: read a page the user links to. The search tool above only opens
+# pages its own search returned, so this is the one way to fetch a given URL.
+# The broker serves it as a one-tool MCP server over the same TinyFish key.
+mcpServers:
+  web-fetch:
+    type: 'streamable-http'
+    url: '${TCHAT_BROKER_ORIGIN}/tinyfish/mcp'
+    headers:
+      Authorization: 'Bearer ${TCHAT_BROKER_SHARED_KEY}'
+    title: 'Web fetch'
+    description: 'Fetch a web page by URL and read its content.'
+    # Equipped on every chat (fork option), and so kept out of the MCP picker,
+    # where a toggle would do nothing.
+    alwaysOn: true
+    chatMenu: false
+    startup: true
+    timeout: 120000
+
+mcpSettings:
+  # As for web search: the MCP SSRF guard refuses private addresses, and
+  # web-fetch lives on the broker. Naming it here keeps that guard on for every
+  # other server, where `allowedDomains` would switch it off.
+  allowedAddresses:
+    - 'tchat-broker:8081'
 
 registration:
   # OpenID is the only social provider Tchat will ever accept, and it points at

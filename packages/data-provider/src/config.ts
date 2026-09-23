@@ -2315,6 +2315,7 @@ export type TStartupConfig = {
   allowAccountDeletion: boolean;
   minPasswordLength?: number;
   webSearch?: {
+    alwaysOn?: boolean;
     searchProvider?: SearchProviders;
     scraperProvider?: ScraperProviders;
     rerankerType?: RerankerTypes;
@@ -2423,6 +2424,8 @@ export function normalizeSearxngEngines(engines?: string | string[]): string | u
 }
 
 export const webSearchSchema = z.object({
+  /** Equip `web_search` on every chat and hide its toggle, so users cannot switch it off. */
+  alwaysOn: z.boolean().optional(),
   allowedAddresses: allowedAddressesSchema,
   serperApiKey: z.string().optional().default('${SERPER_API_KEY}'),
   serperApiKeyPreview: apiKeyPreviewSchema,

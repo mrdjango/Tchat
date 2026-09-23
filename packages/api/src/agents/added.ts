@@ -28,6 +28,7 @@ import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
 import { getCustomEndpointConfig } from '~/app/config';
 import { resolveImageSpec } from '~/images/specs';
+import { getPinnedTools } from '~/agents/pinned';
 
 const { mcp_all, mcp_delimiter } = Constants;
 
@@ -222,6 +223,11 @@ export async function loadAddedAgent(
       mcpServers.add(mcpServer);
     }
   }
+  const pinned = getPinnedTools(appConfig);
+  const optionalServers = new Set(pinned.mcpServers.filter((name) => !mcpServers.has(name)));
+  for (const mcpServer of optionalServers) {
+    mcpServers.add(mcpServer);
+  }
 
   const tools: string[] = [];
   if (ephemeralAgent?.execute_code === true || modelSpec?.executeCode === true) {
@@ -230,7 +236,7 @@ export async function loadAddedAgent(
   if (ephemeralAgent?.file_search === true || modelSpec?.fileSearch === true) {
     tools.push(Tools.file_search);
   }
-  if (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true) {
+  if (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true || pinned.webSearch) {
     tools.push(Tools.web_search);
   }
   if (ephemeralAgent?.memory === true || modelSpec?.memory === true) {
@@ -264,6 +270,10 @@ export async function loadAddedAgent(
       overlayConfig && requiresEphemeralUserConnection(overlayConfig)
         ? null
         : await deps.getMCPServerTools(userId, mcpServer, overlayConfig);
+    if (!serverTools && optionalServers.has(mcpServer)) {
+      logger.warn(`[loadAddedAgent] Skipping pinned MCP server "${mcpServer}": no tools`);
+      continue;
+    }
     if (!serverTools) {
       tools.push(`${mcp_all}${mcp_delimiter}${mcpServer}`);
       addedServers.add(mcpServer);

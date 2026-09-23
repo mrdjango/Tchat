@@ -354,6 +354,18 @@ describe('GET /api/config', () => {
       expect(response.body.codeEnvironmentDecisionVersion).toBeUndefined();
     });
 
+    it('advertises webSearch.alwaysOn so the client can hide the toggle', async () => {
+      mockGetAppConfig.mockResolvedValue({
+        ...baseAppConfig,
+        webSearch: { searchProvider: 'tavily', alwaysOn: true, tavilyApiKey: 'secret' },
+      });
+      const app = createApp(mockUser);
+
+      const response = await request(app).get('/api/config');
+
+      expect(response.body.webSearch).toEqual({ searchProvider: 'tavily', alwaysOn: true });
+    });
+
     it('does not advertise conversation moves unless the effective policy enables them', async () => {
       mockGetAppConfig.mockResolvedValue(baseAppConfig);
       const app = createApp(mockUser);
