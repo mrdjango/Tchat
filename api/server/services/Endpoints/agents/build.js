@@ -1,7 +1,7 @@
 const { logger } = require('@librechat/data-schemas');
 const { loadAgent: loadAgentFn } = require('@librechat/api');
 const { isAgentsEndpoint, removeNullishValues, Constants } = require('librechat-data-provider');
-const { getMCPServerTools } = require('~/server/services/Config');
+const { getMCPServerTools, isUnmodifiedAppMCPServer } = require('~/server/services/Config');
 const { getAccessibleMCPServers } = require('~/server/services/MCP');
 const db = require('~/models');
 
@@ -10,6 +10,7 @@ const loadAgent = (params) =>
     getAgent: db.getAgent,
     getMCPServerTools,
     getAccessibleMCPServers,
+    isUnmodifiedAppMCPServer,
   });
 
 const buildOptions = (req, endpoint, parsedBody, endpointType) => {

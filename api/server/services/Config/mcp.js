@@ -31,12 +31,17 @@ const {
     MCPServersRegistry.getInstance().isAppServerConfig(serverName, effectiveConfig),
 });
 
+/** Whether a raw `mcpConfig` entry is the operator's YAML server, unmodified. */
+const isUnmodifiedAppMCPServer = (serverName, rawConfig) =>
+  MCPServersRegistry.getInstance().isUnmodifiedAppServer(serverName, rawConfig);
+
 module.exports = {
   syncStaticTools,
   mergeAppTools,
   getMCPServerTools,
   cacheMCPServerTools,
   updateMCPServerTools,
+  isUnmodifiedAppMCPServer,
   getMCPToolsCacheGeneration,
   renewMCPToolsCacheGeneration,
   getNextAppToolsPublicationRevision,

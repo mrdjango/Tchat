@@ -424,6 +424,24 @@ export class MCPServersRegistry {
   }
 
   /**
+   * Whether a raw app-config entry (`appConfig.mcpConfig[name]`) is just the operator's YAML
+   * server, unmodified. The YAML-tier entry carries inspector-derived fields (`requiresOAuth`,
+   * ...) the raw entry lacks, so callers that key caches by config must resolve through
+   * `getServerConfig` instead of hashing the raw entry. Same rule `ensureConfigServers` uses to
+   * decide the entry is not a config-tier overlay.
+   */
+  public async isUnmodifiedAppServer(
+    serverName: string,
+    rawConfig: t.MCPOptions,
+  ): Promise<boolean> {
+    const yamlEntry = await this.cacheConfigsRepo.get(serverName);
+    if (!yamlEntry) {
+      return false;
+    }
+    return this.isUnmodifiedYamlServer({ [serverName]: yamlEntry }, serverName, rawConfig);
+  }
+
+  /**
    * Returns the full server config map after merging YAML cache, Config-tier overrides,
    * and User-DB entries.
    *

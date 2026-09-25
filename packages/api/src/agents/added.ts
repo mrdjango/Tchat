@@ -16,17 +16,15 @@ import type {
   TModelSpec,
 } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
+import type { IsUnmodifiedAppMCPServer } from '~/agents/lookup';
 import type { ParsedServerConfig } from '~/mcp/types';
-import {
-  requiresEphemeralUserConnection,
-  filterChatSelectableMCPServers,
-  validateMCPServerConfig,
-} from '~/mcp/utils';
 import { ASK_USER_QUESTION_TOOL_NAME } from '~/agents/hitl/askUserQuestionTool';
 import { synthesizeBackgroundToolOptions } from '~/agents/background';
 import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
+import { filterChatSelectableMCPServers } from '~/mcp/utils';
 import { getCustomEndpointConfig } from '~/app/config';
+import { getMCPToolsLookup } from '~/agents/lookup';
 import { resolveImageSpec } from '~/images/specs';
 import { getPinnedTools } from '~/agents/pinned';
 
@@ -76,6 +74,10 @@ export interface LoadAddedAgentDeps {
     userId: string,
     role?: string,
   ) => Promise<Record<string, ParsedServerConfig>>;
+  /** Tells an unmodified YAML server's raw `mcpConfig` entry apart from a real
+   *  overlay, so its catalog is looked up by the registry config it was
+   *  published under. Omitted, every entry is treated as an overlay. */
+  isUnmodifiedAppMCPServer?: IsUnmodifiedAppMCPServer;
 }
 
 interface LoadAddedAgentParams {
@@ -264,12 +266,14 @@ export async function loadAddedAgent(
     }
     /** Address durable catalogs by the effective request overlay; request-scoped
      *  overlays still expand fresh through `mcp_all`. */
-    const rawOverlayConfig = appConfig?.mcpConfig?.[mcpServer];
-    const overlayConfig = rawOverlayConfig ? validateMCPServerConfig(rawOverlayConfig) : undefined;
-    const serverTools =
-      overlayConfig && requiresEphemeralUserConnection(overlayConfig)
-        ? null
-        : await deps.getMCPServerTools(userId, mcpServer, overlayConfig);
+    const lookup = await getMCPToolsLookup(
+      mcpServer,
+      appConfig?.mcpConfig?.[mcpServer],
+      deps.isUnmodifiedAppMCPServer,
+    );
+    const serverTools = lookup.requestScoped
+      ? null
+      : await deps.getMCPServerTools(userId, mcpServer, lookup.serverConfig);
     if (!serverTools && optionalServers.has(mcpServer)) {
       logger.warn(`[loadAddedAgent] Skipping pinned MCP server "${mcpServer}": no tools`);
       continue;
