@@ -1,9 +1,11 @@
 import {
   ErrorTypes,
+  DEFAULT_MAX_PROVIDER_ERROR_CHARS,
   parseLangChainErrorCode,
   stripLangChainTroubleshootingUrl,
 } from 'librechat-data-provider';
-import { isOwnedAbortError } from '~/utils/errors';
+import { MCPErrorCodes, isMCPInitializationError } from '~/mcp/errors';
+import { OboTokenResolutionError } from '~/mcp/oauth/obo';
 
 export const AGENT_EXPECTED_MCP_TOOLS_UNAVAILABLE = 'AGENT_EXPECTED_MCP_TOOLS_UNAVAILABLE';
 export const AGENT_ATTACHMENT_LIMIT_EXCEEDED = 'AGENT_ATTACHMENT_LIMIT_EXCEEDED';
@@ -57,7 +59,7 @@ export function isFatalAgentInitializationError(
 ): boolean {
   const code = getErrorCode(error);
   return (
-    isOwnedAbortError(error, options.signal) ||
+    isMCPInitializationError(error, options.signal) ||
     FATAL_AGENT_INITIALIZATION_CODES.has(code as string) ||
     (code === AGENT_EXPECTED_MCP_TOOLS_UNAVAILABLE && options.allowExpectedMCPFallback !== true)
   );
@@ -114,6 +116,34 @@ export function getUserFacingProviderError(error: unknown, protectionEnabled: bo
   return stripLangChainTroubleshootingUrl(error.message) || GENERIC_PROVIDER_ERROR;
 }
 
+/** Bounded lookahead covers LangChain's appended troubleshooting label and URL. */
+const TROUBLESHOOTING_LOOKAHEAD = 256;
+
+/**
+ * The provider's own words for a failure, or `undefined` when it has none to give. A gateway,
+ * proxy or OpenAI-compatible endpoint answers a rejection it alone can explain, and that sentence
+ * is more specific than any generic string we could write.
+ *
+ * Read defensively: an SDK error's `message` may be a hostile accessor or a body object rather
+ * than a string, and the docs URL LangChain stamps in is not for a reader.
+ */
+export function getProviderErrorMessage(
+  error: unknown,
+  maxChars: number = DEFAULT_MAX_PROVIDER_ERROR_CHARS,
+): string | undefined {
+  const raw =
+    error != null && typeof error === 'object' ? readErrorProperty(error, 'message') : error;
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const limit =
+    Number.isSafeInteger(maxChars) && maxChars >= 0 ? maxChars : DEFAULT_MAX_PROVIDER_ERROR_CHARS;
+  const message = stripLangChainTroubleshootingUrl(raw.slice(0, limit + TROUBLESHOOTING_LOOKAHEAD))
+    .slice(0, limit)
+    .trim();
+  return message.length === 0 ? undefined : message;
+}
+
 /**
  * LangGraph's stable machine identifier for "the graph ran out of supersteps".
  * Set as `lc_error_code` on the `GraphRecursionError` thrown by the Pregel loop
@@ -160,4 +190,30 @@ export function isStepLimitError(error: unknown): boolean {
     current = readErrorProperty(current, 'cause');
   }
   return false;
+}
+
+/** Outward metadata shared by UI generation failures and both remote agent APIs. */
+export function getAgentErrorMetadata(
+  error: unknown,
+): { status?: number; code?: string; retryable?: boolean } | undefined {
+  if (error instanceof OboTokenResolutionError) {
+    return {
+      status: error.retryable ? 503 : 403,
+      code: error.retryable
+        ? MCPErrorCodes.AUTHENTICATION_REFRESH_FAILED
+        : MCPErrorCodes.AUTHENTICATION_REJECTED,
+      retryable: error.retryable,
+    };
+  }
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const candidate = error as { status?: unknown; statusCode?: unknown; code?: unknown };
+  const status = candidate.status ?? candidate.statusCode;
+  return {
+    ...(typeof status === 'number' && Number.isInteger(status) && status >= 400 && status < 600
+      ? { status }
+      : {}),
+    ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
+  };
 }
