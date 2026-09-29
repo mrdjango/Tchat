@@ -11,6 +11,12 @@ import { CATALOG_PREFIX, createCatalog } from './catalog.js';
  *  half posts multipart/form-data rather than JSON. */
 const RELAY_PREFIXES = [
   '/v1/chat/completions',
+  /** LibreChat switches a turn to the Responses API whenever web search is on,
+   *  whatever the model — so leaving this out made every such turn fail with a
+   *  broker 404 that reads as "model unavailable". The Gateway serves the path
+   *  natively. Prefix matching also covers `/v1/responses/compact` and the
+   *  per-response `/v1/responses/{id}` reads. */
+  '/v1/responses',
   '/v1/messages',
   '/v1/models',
   '/v1/embeddings',

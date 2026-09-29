@@ -243,6 +243,46 @@ test('the broker refuses to relay paths outside the inference surface', async ()
   assert.equal(calls.length, 0);
 });
 
+test('the Responses API relays, so a web-search turn is not refused as unsupported', async () => {
+  const { impl, calls } = makeFetch({ tokens: [{ id: '43', name: 'TCHAT' }] });
+  const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
+
+  const response = await app(
+    new Request('http://broker.internal/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.sharedKey}`,
+        'X-Tchat-User-Email': 'chat-user@example.com',
+      },
+      body: JSON.stringify({ model: 'codex-auto-review', input: 'hi' }),
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  const upstream = calls.at(-1);
+  assert.equal(upstream.url, 'https://api.tensorgrid.space/v1/responses');
+  assert.equal(upstream.init.headers.get('authorization'), 'Bearer sk-revealed-user-token');
+});
+
+test('a stored response is readable, since the prefix covers /v1/responses/{id}', async () => {
+  const { impl, calls } = makeFetch({ tokens: [{ id: '43', name: 'TCHAT' }] });
+  const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
+
+  const response = await app(
+    new Request('http://broker.internal/v1/responses/resp_123', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${config.sharedKey}`,
+        'X-Tchat-User-Email': 'chat-user@example.com',
+      },
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(calls.at(-1).url, 'https://api.tensorgrid.space/v1/responses/resp_123');
+});
+
 test("image generation relays on the signed-in user's own Gateway token", async () => {
   const { impl, calls } = makeFetch({ tokens: [{ id: '43', name: 'TCHAT' }] });
   const app = createApp({ config, cache: createCache(), fetchImpl: impl, logger: silent });
