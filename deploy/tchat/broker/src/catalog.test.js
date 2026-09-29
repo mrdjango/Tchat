@@ -22,6 +22,7 @@ const catalogBody = {
   results: [
     {
       id: 'Qwen3.8-27B',
+      category: 'language',
       pricing: { input_per_million_microusd: 0, output_per_million_microusd: 0, extra_meters: {} },
     },
     {
@@ -30,6 +31,7 @@ const catalogBody = {
     },
     {
       id: 'gemini-3-pro-image-c',
+      category: 'image',
       pricing: {
         input_per_million_microusd: 0,
         output_per_million_microusd: 0,
@@ -76,58 +78,59 @@ test('isFreePricing needs every listed price, extra meters included, to be zero'
   assert.equal(isFreePricing(null), false);
 });
 
-test('free-models lists only zero-priced models from the catalog', async () => {
+test('the catalog lists only zero-priced models from the catalog', async () => {
   const fetch = makeFetch([{ body: catalogBody }]);
   const app = createApp({ config, cache: createCache(), fetchImpl: fetch.impl, logger: silent });
 
-  const response = await app(get('/tchat/catalog/free-models'));
+  const response = await app(get('/tchat/catalog/models'));
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     revision: 'rev-1',
     free: ['Qwen3.8-27B', 'minimaxai/minimax-m3'],
+    categories: { 'Qwen3.8-27B': 'language', 'gemini-3-pro-image-c': 'image' },
   });
   assert.deepEqual(fetch.calls, ['http://backend:8000/api/model-hub/catalog/']);
 });
 
-test('free-models needs the shared key but no user identity', async () => {
+test('the catalog needs the shared key but no user identity', async () => {
   const fetch = makeFetch([{ body: catalogBody }]);
   const app = createApp({ config, cache: createCache(), fetchImpl: fetch.impl, logger: silent });
 
-  const refused = await app(get('/tchat/catalog/free-models', 'wrong-key'));
+  const refused = await app(get('/tchat/catalog/models', 'wrong-key'));
   assert.equal(refused.status, 401);
   assert.equal(fetch.calls.length, 0);
 });
 
-test('free-models reuses the cached list within its TTL', async () => {
+test('the catalog reuses the cached list within its TTL', async () => {
   const fetch = makeFetch([{ body: catalogBody }]);
   const app = createApp({ config, cache: createCache(), fetchImpl: fetch.impl, logger: silent });
 
-  await app(get('/tchat/catalog/free-models'));
-  const second = await app(get('/tchat/catalog/free-models'));
+  await app(get('/tchat/catalog/models'));
+  const second = await app(get('/tchat/catalog/models'));
 
   assert.equal(second.status, 200);
   assert.equal(fetch.calls.length, 1);
 });
 
-test('free-models keeps serving the last good list when TensorGrid fails', async () => {
+test('the catalog keeps serving the last good list when TensorGrid fails', async () => {
   const cache = createCache();
   const fetch = makeFetch([{ body: catalogBody }, { status: 502, body: {} }]);
   const app = createApp({ config, cache, fetchImpl: fetch.impl, logger: silent });
 
-  await app(get('/tchat/catalog/free-models'));
-  await cache.del('catalog:free-models');
-  const stale = await app(get('/tchat/catalog/free-models'));
+  await app(get('/tchat/catalog/models'));
+  await cache.del('catalog:models');
+  const stale = await app(get('/tchat/catalog/models'));
 
   assert.equal(stale.status, 200);
   assert.deepEqual((await stale.json()).free, ['Qwen3.8-27B', 'minimaxai/minimax-m3']);
 });
 
-test('free-models answers 503 when TensorGrid has never answered', async () => {
+test('the catalog answers 503 when TensorGrid has never answered', async () => {
   const fetch = makeFetch([new Error('connect ECONNREFUSED')]);
   const app = createApp({ config, cache: createCache(), fetchImpl: fetch.impl, logger: silent });
 
-  const response = await app(get('/tchat/catalog/free-models'));
+  const response = await app(get('/tchat/catalog/models'));
 
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error.code, 'tensorgrid_unavailable');

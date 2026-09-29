@@ -2,18 +2,20 @@ import React, { useCallback, useMemo, useState } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { useNavigate } from 'react-router-dom';
 import { TooltipAnchor } from '@librechat/client';
-import { Bot, Check, ChevronDown, LayoutGrid, Pin, PinOff, Search } from 'lucide-react';
+import { Bot, Check, ChevronDown, ImageIcon, LayoutGrid, Pin, PinOff, Search } from 'lucide-react';
 import { getConfigDefaults, isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
-import type { TModelSpec } from 'librechat-data-provider';
+import type { TImageSpec, TModelSpec } from 'librechat-data-provider';
 import type { Endpoint, ModelSelectorProps } from '~/common';
 import { ModelSelectorProvider, useModelSelectorContext } from '../ModelSelectorContext';
 import { buildOwnerGroups, formatModelLabel, getModelOwner, getOwner } from './owners';
 import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
 import { ModelSelectorChatProvider } from '../ModelSelectorChatContext';
+import { useImageGenAvailable } from '~/hooks/Plugins';
 import { getSpecAgentAvatarURL, cn } from '~/utils';
 import { useFavorites, useLocalize } from '~/hooks';
+import useImageGenChoice from './useImageGenChoice';
+import useModelCatalog from './useModelCatalog';
 import SpecIcon from '../components/SpecIcon';
-import useFreeModels from './useFreeModels';
 import OwnerMark from './OwnerMark';
 
 const defaultInterface = getConfigDefaults().interface;
@@ -92,7 +94,30 @@ function SpecArt({ spec, size }: { spec: TModelSpec; size: number }) {
   );
 }
 
-function useGroups(): { groups: Group[]; current: Current | null } {
+/** The image model Image Gen will use, shown beside the chat model on the trigger. */
+interface ImageChoice {
+  label: string;
+  model: string;
+}
+
+/** Image Gen's own mark, for the group header and rail. */
+function ImageMark({ size }: { size: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{ width: size, height: size }}
+      className="inline-flex shrink-0 items-center justify-center rounded-lg border border-border-light bg-surface-primary text-text-primary"
+    >
+      <ImageIcon style={{ width: size * 0.6, height: size * 0.6 }} />
+    </span>
+  );
+}
+
+function useGroups(imageSpecs: TImageSpec[]): {
+  groups: Group[];
+  current: Current | null;
+  image: ImageChoice | null;
+} {
   const localize = useLocalize();
   const {
     agentsMap,
@@ -110,12 +135,14 @@ function useGroups(): { groups: Group[]; current: Current | null } {
     isFavoriteSpec,
     toggleFavoriteSpec,
   } = useFavorites();
-  const freeModels = useFreeModels();
+  const catalog = useModelCatalog();
+  const imageGenAvailable = useImageGenAvailable();
+  const imageGen = useImageGenChoice((modelSpecs?.length ?? 0) > 0);
 
   return useMemo(() => {
     const endpoints = mappedEndpoints ?? [];
     const { endpoint: selEndpoint, model: selModel, modelSpec: selSpec } = selectedValues;
-    const ownerGroups = buildOwnerGroups(endpoints);
+    const ownerGroups = buildOwnerGroups(endpoints, catalog.isChatModel);
     const listed = new Set(ownerGroups.flatMap((g) => g.models.map((m) => m.modelId)));
 
     const groups: Group[] = [];
@@ -155,7 +182,7 @@ function useGroups(): { groups: Group[]; current: Current | null } {
           label: model.label,
           detail: model.modelId,
           selected: !isAgentLike(selEndpoint) && selModel === model.modelId,
-          free: freeModels.has(model.modelId),
+          free: catalog.isFree(model.modelId),
           onSelect: () => handleSelectModel(model.endpoint, model.modelId),
           pinned: isFavoriteModel(model.modelId, model.endpoint.value),
           onTogglePin: () =>
@@ -166,7 +193,52 @@ function useGroups(): { groups: Group[]; current: Current | null } {
             model.modelId,
             owner.label,
             owner.family,
-            freeModels.has(model.modelId) ? localize('com_ui_free') : '',
+            catalog.isFree(model.modelId) ? localize('com_ui_free') : '',
+          ]
+            .join(' ')
+            .toLowerCase(),
+        })),
+      });
+    }
+
+    /**
+     * Image models cannot hold a chat, so picking one here turns on Image Gen
+     * with that model and leaves the chat model as it is. Picking the active
+     * one again turns Image Gen off.
+     */
+    let image: ImageChoice | null = null;
+    if (imageGenAvailable && imageSpecs.length > 0) {
+      const defaultSpec = imageSpecs.find((spec) => spec.default === true) ?? imageSpecs[0];
+      const { selection } = imageGen;
+      /** `true` (or a name that outlived its entry) means the default, as on the server. */
+      let activeName: string | null = null;
+      if (selection) {
+        const named =
+          typeof selection === 'string' && imageSpecs.some((spec) => spec.name === selection);
+        activeName = named ? (selection as string) : defaultSpec.name;
+      }
+      const active = imageSpecs.find((spec) => spec.name === activeName);
+      image = active ? { label: active.label, model: active.model } : null;
+      const imageLabel = localize('com_ui_image_gen');
+      groups.push({
+        id: 'image',
+        label: imageLabel,
+        mark: <ImageMark size={20} />,
+        rows: imageSpecs.map((spec) => ({
+          key: `image::${spec.name}`,
+          label: spec.label,
+          detail: spec.model,
+          mark: <OwnerMark owner={getModelOwner(spec.model)} size={28} />,
+          selected: spec.name === activeName,
+          free: catalog.isFree(spec.model),
+          onSelect: () => imageGen.select(spec.name === activeName ? false : spec.name),
+          searchText: [
+            spec.label,
+            spec.model,
+            spec.description,
+            imageLabel,
+            getOwner(getModelOwner(spec.model)).label,
+            catalog.isFree(spec.model) ? localize('com_ui_free') : '',
           ]
             .join(' ')
             .toLowerCase(),
@@ -227,7 +299,7 @@ function useGroups(): { groups: Group[]; current: Current | null } {
         label: formatModelLabel(selModel),
         caption: owner.label,
         detail: selModel,
-        free: freeModels.has(selModel),
+        free: catalog.isFree(selModel),
         mark: <OwnerMark owner={owner.id} size={24} />,
         groupId: owner.id,
       };
@@ -242,7 +314,7 @@ function useGroups(): { groups: Group[]; current: Current | null } {
       }
     }
 
-    return { groups, current };
+    return { groups, current, image };
   }, [
     localize,
     agentsMap,
@@ -257,7 +329,10 @@ function useGroups(): { groups: Group[]; current: Current | null } {
     toggleFavoriteAgent,
     isFavoriteSpec,
     toggleFavoriteSpec,
-    freeModels,
+    catalog,
+    imageGenAvailable,
+    imageGen,
+    imageSpecs,
   ]);
 }
 
@@ -334,18 +409,19 @@ function ModelRow({ row, onPicked }: { row: Row; onPicked: () => void }) {
   );
 }
 
-function TchatModelSelectorContent() {
+const NO_IMAGE_SPECS: TImageSpec[] = [];
+
+function TchatModelSelectorContent({ imageSpecs }: { imageSpecs: TImageSpec[] }) {
   const localize = useLocalize();
   const navigate = useNavigate();
   const modelSelectorHint = useShortcutHint('openModelSelector', localize('com_ui_select_model'));
   const modelSelectorAriaKey = useShortcutAriaKey('openModelSelector');
-  const { groups, current } = useGroups();
+  const { groups, current, image } = useGroups(imageSpecs);
 
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<string>(ALL);
 
-  const close = useCallback(() => setOpen(false), []);
   const onOpenChange = useCallback((next: boolean) => {
     setOpen(next);
     if (!next) {
@@ -353,6 +429,8 @@ function TchatModelSelectorContent() {
       setFilter(ALL);
     }
   }, []);
+  /** A pick closes the picker the same way dismissing it does, so it reopens clean. */
+  const close = useCallback(() => onOpenChange(false), [onOpenChange]);
 
   const term = search.trim().toLowerCase();
   const marketplaceLabel = localize('com_agents_marketplace');
@@ -401,6 +479,18 @@ function TchatModelSelectorContent() {
             <span className="hidden shrink-0 text-text-secondary sm:inline">{current.caption}</span>
           )}
           {current?.free && <FreeTag />}
+          {image && (
+            <span
+              title={`${localize('com_ui_image_gen')}: ${image.label}`}
+              className="flex shrink-0 items-center gap-1 rounded-md border border-border-medium px-1.5 py-0.5 text-xs text-text-secondary"
+            >
+              <ImageIcon className="size-3.5" aria-hidden="true" />
+              <span className="hidden max-w-[10rem] truncate md:inline">{image.label}</span>
+              <Ariakit.VisuallyHidden>
+                {`${localize('com_ui_image_gen')}: ${image.label}`}
+              </Ariakit.VisuallyHidden>
+            </span>
+          )}
           <ChevronDown
             aria-hidden="true"
             className={cn(
@@ -594,7 +684,9 @@ export default function TchatModelSelector({ startupConfig }: ModelSelectorProps
   return (
     <ModelSelectorChatProvider>
       <ModelSelectorProvider startupConfig={startupConfig}>
-        <TchatModelSelectorContent />
+        <TchatModelSelectorContent
+          imageSpecs={startupConfig?.modelSpecs?.imageList ?? NO_IMAGE_SPECS}
+        />
       </ModelSelectorProvider>
     </ModelSelectorChatProvider>
   );

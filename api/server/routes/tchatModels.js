@@ -1,15 +1,16 @@
 const express = require('express');
-const { getTchatFreeModels } = require('@librechat/api');
+const { getTchatModelCatalog } = require('@librechat/api');
 const { requireJwtAuth } = require('~/server/middleware/');
 
 /**
- * Tchat model facts the stock /api/models response has no room for. Today that
- * is which models TensorGrid prices at zero, for the picker's "Free" tag.
+ * Tchat model facts the stock /api/models response has no room for: which
+ * models TensorGrid prices at zero, and each model's category, so the picker
+ * offers only chat models as chat models.
  */
 const router = express.Router();
 
-router.get('/free', requireJwtAuth, async (_req, res) => {
-  res.json({ free: await getTchatFreeModels() });
+router.get('/catalog', requireJwtAuth, async (_req, res) => {
+  res.json(await getTchatModelCatalog());
 });
 
 module.exports = router;
