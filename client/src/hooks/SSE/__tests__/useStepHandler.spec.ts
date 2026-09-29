@@ -50,6 +50,7 @@ type TSubmissionForTest = {
   isTemporary: boolean;
   messages: TMessage[];
   isRegenerate?: boolean;
+  compact?: boolean;
   conversation: Partial<TConversation>;
   endpointOption: TEndpointOption;
   initialResponse: TMessage;
@@ -210,6 +211,40 @@ describe('useStepHandler', () => {
       expect(setMessagesCall).toContainEqual(
         expect.objectContaining({ messageId: 'response-msg-1' }),
       );
+    });
+
+    it('keeps an assistant compaction anchor when the response receives its durable ID', () => {
+      const userMessage = createUserMessage();
+      const anchor = createResponseMessage({ messageId: 'anchor-response' });
+      const initialResponse = createResponseMessage({
+        messageId: 'anchor-response_',
+        parentMessageId: anchor.messageId,
+      });
+      const submission = createSubmission({
+        userMessage: { ...anchor, text: '' },
+        messages: [userMessage, anchor],
+        initialResponse,
+        isRegenerate: true,
+        compact: true,
+      });
+      const runStep = createRunStep({ runId: 'summary-response' });
+
+      const { result } = renderHook(() => useStepHandler(createHookParams()));
+      act(() => {
+        result.current.stepHandler({ event: StepEvents.ON_RUN_STEP, data: runStep }, submission);
+      });
+
+      const messages = mockSetMessages.mock.calls.at(-1)?.[0] as TMessage[];
+      expect(messages.map(({ messageId }) => messageId)).toEqual([
+        userMessage.messageId,
+        anchor.messageId,
+        'summary-response',
+      ]);
+      expect(messages[1]).toBe(anchor);
+      expect(messages[2]).toMatchObject({
+        messageId: 'summary-response',
+        parentMessageId: anchor.messageId,
+      });
     });
 
     it('should warn and return early when no responseMessageId', () => {
@@ -1876,6 +1911,47 @@ describe('useStepHandler', () => {
         (c: TMessageContentParts) => c.type === ContentTypes.TOOL_CALL,
       );
       expect(toolCallContent?.tool_call?.auth).toEqual('oauth-token-123');
+    });
+  });
+
+  describe('on_run_step_closed event', () => {
+    it('stamps the failure time onto the visible tool call', () => {
+      mockGetMessages.mockReturnValue([createResponseMessage()]);
+      const { result } = renderHook(() => useStepHandler(createHookParams()));
+      const submission = createSubmission();
+      const closedAt = Date.now() - 1000;
+
+      act(() => {
+        result.current.stepHandler(
+          { event: StepEvents.ON_RUN_STEP, data: createToolCallRunStep() },
+          submission,
+        );
+        result.current.stepHandler(
+          {
+            event: StepEvents.ON_RUN_STEP_CLOSED,
+            data: {
+              id: 'step-tool-1',
+              index: 0,
+              type: StepTypes.TOOL_CALLS,
+              status: 'failed',
+              created_at: closedAt - 3000,
+              closed_at: closedAt,
+            } as Agents.RunStepClosedEvent,
+          },
+          submission,
+        );
+      });
+
+      const messages = mockSetMessages.mock.lastCall?.[0] as TMessage[];
+      const response = messages.find((message) => message.messageId === 'response-msg-1');
+      expect(response?.content?.[0]).toMatchObject({
+        type: ContentTypes.TOOL_CALL,
+        tool_call: {
+          runStepStatus: 'failed',
+          runStepDurationMs: 3000,
+          runStepClosedAt: closedAt,
+        },
+      });
     });
   });
 

@@ -9,6 +9,7 @@ import {
   ToolCallTypes,
   getNonEmptyValue,
   getRunStepDurationMs,
+  getRunStepCloseMetadata,
 } from 'librechat-data-provider';
 import type {
   Agents,
@@ -719,6 +720,11 @@ export default function useStepHandler({
       const shouldRemoveRegenerateResponse = (message: TMessage, responseMessageId: string) =>
         submission.isRegenerate &&
         !message.isCreatedByUser &&
+        /** A compaction's preliminary response is `${anchorId}_`. The ordinary
+         *  regenerate alias set strips that suffix, but here the base ID is the
+         *  assistant ANCHOR, not a response being replaced. Keep it so the
+         *  summary remains its child instead of becoming an orphan root. */
+        (submission.compact !== true || message.messageId !== userMessage.messageId) &&
         getRegenerateResponseIds(responseMessageId).has(message.messageId);
       const shouldRemoveInitialResponse = (message: TMessage, responseMessageId: string) => {
         const initialResponseId = submission.initialResponse?.messageId;
@@ -1351,6 +1357,7 @@ export default function useStepHandler({
           [ContentTypes.TOOL_CALL]: {
             ...existingToolCall,
             runStepStatus: closed.status,
+            ...getRunStepCloseMetadata(closed),
             ...(durationMs != null && { runStepDurationMs: durationMs }),
           },
         };
