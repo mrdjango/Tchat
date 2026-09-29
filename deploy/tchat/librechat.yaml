@@ -238,3 +238,71 @@ modelSpecs:
       model: 'gemini-3-pro-image-c'
       protocol: 'gemini'
 
+    # LinkAPI's image lineup (2026-09-29), each verified end to end through the
+    # Gateway with this tool's own request shape. `-c`/`-h` and the Gemini
+    # `*-preview`/`-lite`/`2.5` entries bill per image; the rest bill by tokens.
+    # LinkAPI answers edits and `gpt-image-2.5-c` with a hosted URL, which the
+    # OpenAI image tool now downloads. Left out: token-billed
+    # `gpt-image-2.5-sunburst` / `-flare`, whose LinkAPI group returns 503
+    # "上游负载已饱和" on nearly every request.
+    - name: 'gpt-image-2-draft'
+      label: 'GPT Image 2 · Draft'
+      description: 'Lower-detail GPT Image 2 at the lowest price per image.'
+      model: 'gpt-image-2-c'
+
+    - name: 'gpt-image-2-hd'
+      label: 'GPT Image 2 · HD'
+      description: 'Higher-detail GPT Image 2, flat price per image.'
+      model: 'gpt-image-2-h'
+
+    - name: 'gpt-image-2-5'
+      label: 'GPT Image 2.5'
+      description: "OpenAI's GPT Image 2.5, flat price per image."
+      model: 'gpt-image-2.5-c'
+
+    - name: 'gpt-image-2-5-sunburst'
+      label: 'GPT Image 2.5 Sunburst'
+      description: 'GPT Image 2.5 Sunburst variant, flat price per image.'
+      model: 'gpt-image-2.5-sunburst-h'
+
+    - name: 'gpt-image-2-5-flare'
+      label: 'GPT Image 2.5 Flare'
+      description: 'GPT Image 2.5 Flare variant, flat price per image.'
+      model: 'gpt-image-2.5-flare-h'
+
+    - name: 'gemini-3-pro-image'
+      label: 'Gemini 3 Pro Image · per token'
+      description: 'Gemini 3 Pro image model, billed by output tokens instead of per image.'
+      model: 'gemini-3-pro-image'
+      protocol: 'gemini'
+
+    - name: 'gemini-3-pro-image-preview'
+      label: 'Gemini 3 Pro Image Preview'
+      description: 'Preview release of Gemini 3 Pro image, flat price per image.'
+      model: 'gemini-3-pro-image-preview'
+      protocol: 'gemini'
+
+    - name: 'gemini-3-1-flash-image'
+      label: 'Gemini 3.1 Flash Image'
+      description: 'Faster, cheaper Gemini image model, billed by output tokens.'
+      model: 'gemini-3.1-flash-image'
+      protocol: 'gemini'
+
+    - name: 'gemini-3-1-flash-image-preview'
+      label: 'Gemini 3.1 Flash Image Preview'
+      description: 'Preview release of Gemini 3.1 Flash image, billed by output tokens.'
+      model: 'gemini-3.1-flash-image-preview'
+      protocol: 'gemini'
+
+    - name: 'gemini-3-1-flash-lite-image'
+      label: 'Gemini 3.1 Flash Lite Image'
+      description: 'Lightest Gemini image model, flat price per image.'
+      model: 'gemini-3.1-flash-lite-image'
+      protocol: 'gemini'
+
+    - name: 'gemini-2-5-flash-image'
+      label: 'Gemini 2.5 Flash Image'
+      description: 'Previous-generation Gemini Flash image model, flat price per image.'
+      model: 'gemini-2.5-flash-image'
+      protocol: 'gemini'
+

@@ -49,6 +49,44 @@ function createAbortHandler() {
   };
 }
 
+/** Largest hosted image the tool will download and inline. */
+const MAX_HOSTED_IMAGE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Returns an image result as base64. OpenAI's `gpt-image-*` models always answer
+ * with `b64_json`, but some upstreams behind the Tchat gateway answer with a
+ * hosted `url` instead (LinkAPI does for every edit). Only https URLs are
+ * followed, redirects included, and none of this request's credentials go with
+ * the download: the URL comes from the gateway's own response, not the user.
+ * @param {{ b64_json?: string, url?: string } | undefined} item
+ * @param {AbortSignal | null} [signal]
+ * @returns {Promise<string | undefined>}
+ */
+async function resolveImageBase64(item, signal) {
+  if (item?.b64_json) {
+    return item.b64_json;
+  }
+  if (typeof item?.url !== 'string' || !item.url.startsWith('https://')) {
+    return undefined;
+  }
+  /** @type {import('axios').AxiosRequestConfig} */
+  const config = {
+    responseType: 'arraybuffer',
+    timeout: 60000,
+    maxContentLength: MAX_HOSTED_IMAGE_BYTES,
+    maxRedirects: 3,
+    beforeRedirect: (options) => {
+      if (options.protocol !== 'https:') {
+        throw new Error('Refusing a non-https redirect for a generated image');
+      }
+    },
+    signal: signal ?? undefined,
+  };
+  applyAxiosProxyConfig(config, item.url);
+  const response = await axios.get(item.url, config);
+  return Buffer.from(response.data).toString('base64');
+}
+
 /**
  * Creates OpenAI Image tools (generation and editing)
  * @param {Object} fields - Configuration fields
@@ -209,7 +247,12 @@ Error Message: ${error.message}`);
 
       // For gpt-image-1, the response contains base64-encoded images
       // TODO: handle cost in `resp.usage`
-      const base64Image = resp.data[0].b64_json;
+      let base64Image;
+      try {
+        base64Image = await resolveImageBase64(resp.data?.[0], runnableConfig?.signal);
+      } catch (error) {
+        logAxiosError({ error, message: '[image_gen_oai] Problem downloading the hosted image:' });
+      }
 
       if (!base64Image) {
         return returnValue(
@@ -381,7 +424,7 @@ Error Message: ${error.message}`);
           );
         }
 
-        const base64Image = response.data.data[0].b64_json;
+        const base64Image = await resolveImageBase64(response.data.data[0], derivedSignal);
         if (!base64Image) {
           return returnValue(
             'No image data returned from OpenAI API. There may be a problem with the API or your configuration.',
