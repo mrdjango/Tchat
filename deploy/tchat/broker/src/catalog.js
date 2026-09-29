@@ -1,10 +1,14 @@
 import { BrokerError, upstreamUnavailable } from './errors.js';
 
-/** Tchat-only reads of TensorGrid's public model catalog. Nothing here bills. */
+/**
+ * Tchat-only reads of TensorGrid's public model catalog, for the model picker:
+ * which models are free, and what each model is (language, image, embeddings,
+ * transcription) so only chat models are offered as chat models. Nothing here bills.
+ */
 export const CATALOG_PREFIX = '/tchat/catalog/';
 
-const FREE_MODELS_PATH = '/tchat/catalog/free-models';
-const CACHE_KEY = 'catalog:free-models';
+const MODELS_PATH = '/tchat/catalog/models';
+const CACHE_KEY = 'catalog:models';
 
 const isZero = (value) => typeof value === 'number' && value === 0;
 
@@ -54,17 +58,25 @@ export const createCatalog = ({ config, cache, fetchImpl = fetch }) => {
     }
     const body = await response.json();
     const models = Array.isArray(body?.results) ? body.results : [];
+    const listed = models.filter((model) => typeof model?.id === 'string');
+    const categories = {};
+    for (const model of listed) {
+      if (typeof model.category === 'string' && model.category) {
+        categories[model.id] = model.category;
+      }
+    }
     return {
       revision: typeof body?.revision === 'string' ? body.revision : '',
-      free: models
-        .filter((model) => typeof model?.id === 'string' && isFreePricing(model.pricing))
+      free: listed
+        .filter((model) => isFreePricing(model.pricing))
         .map((model) => model.id)
         .sort(),
+      categories,
     };
   };
 
   return async (request, url) => {
-    if (url.pathname !== FREE_MODELS_PATH || request.method !== 'GET') {
+    if (url.pathname !== MODELS_PATH || request.method !== 'GET') {
       throw new BrokerError({
         status: 404,
         code: 'unsupported_path',

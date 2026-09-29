@@ -8,7 +8,11 @@ const mockHandleSelectModel = jest.fn();
 const mockHandleSelectSpec = jest.fn();
 const mockNavigate = jest.fn();
 let mockSelectedValues: SelectedValues;
-let mockFreeModels = new Set<string>();
+let mockFree = new Set<string>();
+let mockCategories: Record<string, string> = {};
+let mockImageSelection: boolean | string | undefined;
+let mockImageGenAvailable = true;
+const mockSelectImage = jest.fn();
 
 const endpoint = (value: string, label: string, models: string[]): Endpoint => ({
   value,
@@ -25,6 +29,8 @@ const mockEndpoints: Endpoint[] = [
     'claude-sonnet-5',
     'deepseek-v4-flash',
     'moonshotai/kimi-k3',
+    'gpt-image-2.5-c',
+    'text-embedding-3-small',
   ]),
   endpoint('TensorGrid-Claude', 'TensorGrid Claude', ['claude-opus-5', 'claude-sonnet-5']),
   { ...endpoint('agents', 'My Agents', ['agent_1']), agentNames: { agent_1: 'Research helper' } },
@@ -73,7 +79,19 @@ jest.mock('~/hooks/useKeyboardShortcuts', () => ({
   useShortcutAriaKey: () => undefined,
 }));
 
-jest.mock('../useFreeModels', () => () => mockFreeModels);
+jest.mock('../useModelCatalog', () => () => ({
+  isFree: (id: string) => mockFree.has(id),
+  isChatModel: (id: string) => (mockCategories[id] ?? 'language') === 'language',
+}));
+
+jest.mock('../useImageGenChoice', () => () => ({
+  selection: mockImageSelection,
+  select: mockSelectImage,
+}));
+
+jest.mock('~/hooks/Plugins', () => ({
+  useImageGenAvailable: () => mockImageGenAvailable,
+}));
 
 jest.mock('../../ModelSelectorChatContext', () => ({
   ModelSelectorChatProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -98,7 +116,16 @@ jest.mock('../../ModelSelectorContext', () => ({
   }),
 }));
 
-const startupConfig = { interface: {}, modelSpecs: { list: [] } } as never;
+const startupConfig = {
+  interface: {},
+  modelSpecs: {
+    list: [],
+    imageList: [
+      { name: 'gpt-image', label: 'GPT Image', model: 'gpt-image-2', default: true },
+      { name: 'gpt-image-2-5', label: 'GPT Image 2.5', model: 'gpt-image-2.5-c' },
+    ],
+  },
+} as never;
 
 async function openPicker() {
   const user = userEvent.setup();
@@ -116,6 +143,10 @@ describe('TchatModelSelector', () => {
       model: 'gpt-5.6-terra',
       modelSpec: 'tensorgrid-default',
     };
+    mockFree = new Set();
+    mockCategories = { 'gpt-image-2.5-c': 'image', 'text-embedding-3-small': 'embeddings' };
+    mockImageSelection = undefined;
+    mockImageGenAvailable = true;
   });
 
   it('names the model in use on the trigger, not the spec', () => {
@@ -135,6 +166,7 @@ describe('TchatModelSelector', () => {
       'Anthropic',
       'DeepSeek',
       'Moonshot',
+      'com_ui_image_gen',
       'My Agents',
     ]);
     /** The spec that only names a listed model is folded into that model's row. */
@@ -173,7 +205,7 @@ describe('TchatModelSelector', () => {
   });
 
   it('tags free models, on their rows and on the trigger', async () => {
-    mockFreeModels = new Set(['deepseek-v4-flash', 'gpt-5.6-terra']);
+    mockFree = new Set(['deepseek-v4-flash', 'gpt-5.6-terra']);
     const { dialog } = await openPicker();
     expect(within(dialog).getByRole('option', { name: /DeepSeek V4 Flash/ })).toHaveTextContent(
       'com_ui_free',
@@ -185,9 +217,52 @@ describe('TchatModelSelector', () => {
   });
 
   it('tags nothing while the free list is unknown', async () => {
-    mockFreeModels = new Set();
     const { dialog } = await openPicker();
     expect(within(dialog).queryByText('com_ui_free')).toBeNull();
+  });
+
+  it('does not offer image or embedding models as chat models', async () => {
+    const { dialog } = await openPicker();
+    const openai = within(dialog)
+      .getAllByRole('group')
+      .find((g) => within(g).queryByText('OpenAI'));
+    expect(within(openai as HTMLElement).queryByText(/gpt-image-2\.5-c/)).toBeNull();
+    expect(within(dialog).queryByText('text-embedding-3-small')).toBeNull();
+  });
+
+  it('keeps a model the catalog does not know', async () => {
+    mockCategories = {};
+    const { dialog } = await openPicker();
+    expect(within(dialog).getByText('text-embedding-3-small')).toBeInTheDocument();
+  });
+
+  it('turns on Image Gen with a picked image model and keeps the chat model', async () => {
+    const { user, dialog } = await openPicker();
+    await user.click(within(dialog).getByRole('option', { name: /GPT Image 2\.5/ }));
+    expect(mockSelectImage).toHaveBeenCalledWith('gpt-image-2-5');
+    expect(mockHandleSelectModel).not.toHaveBeenCalled();
+  });
+
+  it('turns Image Gen off when the active image model is picked again', async () => {
+    mockImageSelection = 'gpt-image-2-5';
+    const { user, dialog } = await openPicker();
+    await user.click(within(dialog).getByRole('option', { name: /GPT Image 2\.5/ }));
+    expect(mockSelectImage).toHaveBeenCalledWith(false);
+  });
+
+  it('marks the default image model active when Image Gen is simply on', async () => {
+    mockImageSelection = true;
+    const { dialog } = await openPicker();
+    expect(
+      within(dialog).getByRole('option', { name: /^GPT Image gpt-image-2/ }),
+    ).toHaveTextContent('com_ui_current');
+    expect(screen.getByTestId('model-selector-button')).toHaveTextContent('GPT Image');
+  });
+
+  it('hides the image group where Image Gen is not configured', async () => {
+    mockImageGenAvailable = false;
+    const { dialog } = await openPicker();
+    expect(within(dialog).queryByText('com_ui_image_gen')).toBeNull();
   });
 
   it('shows the agent on the trigger when an agent is selected', () => {

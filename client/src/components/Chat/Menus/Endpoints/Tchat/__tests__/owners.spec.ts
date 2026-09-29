@@ -119,6 +119,13 @@ describe('buildOwnerGroups', () => {
     expect(byOwner.openai.every((m) => m.endpoint.value === 'TensorGrid')).toBe(true);
   });
 
+  it('leaves out what the chat filter rules out', () => {
+    const filtered = buildOwnerGroups([tensorGrid], (id) => !id.startsWith('openai/gpt-oss'));
+    const openai = filtered.find((g) => g.owner.id === 'openai')?.models ?? [];
+    expect(openai.map((m) => m.modelId)).not.toContain('openai/gpt-oss-20b');
+    expect(openai).toHaveLength(6);
+  });
+
   it('prefers the dedicated endpoint whichever order endpoints arrive in', () => {
     const reversed = buildOwnerGroups([tensorGridClaude, tensorGrid]);
     const claude = reversed.find((g) => g.owner.id === 'anthropic')?.models ?? [];

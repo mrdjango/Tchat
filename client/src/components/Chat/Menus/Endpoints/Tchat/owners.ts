@@ -183,7 +183,14 @@ function dedicatedOwner(endpoint: Endpoint): OwnerId | null {
   return models.every((model) => getModelOwner(model.name) === first) ? first : null;
 }
 
-export function buildOwnerGroups(endpoints: Endpoint[]): OwnerGroup[] {
+/**
+ * `isChatModel` drops what cannot hold a chat (image, embedding, transcription
+ * models the Gateway's /v1/models also lists); a chat request to one fails.
+ */
+export function buildOwnerGroups(
+  endpoints: Endpoint[],
+  isChatModel: (modelId: string) => boolean = () => true,
+): OwnerGroup[] {
   const byModelId = new Map<string, PickerModel>();
   const dedicated = new Map<string, OwnerId | null>();
 
@@ -193,6 +200,9 @@ export function buildOwnerGroups(endpoints: Endpoint[]): OwnerGroup[] {
     }
     dedicated.set(endpoint.value, dedicatedOwner(endpoint));
     for (const model of endpoint.models ?? []) {
+      if (!isChatModel(model.name)) {
+        continue;
+      }
       const owner = getModelOwner(model.name);
       const existing = byModelId.get(model.name);
       if (existing) {
