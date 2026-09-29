@@ -8,6 +8,8 @@ interface CatalogBody {
 }
 
 export interface ModelCatalog {
+  /** The catalog has answered; until then nothing is known about any model. */
+  ready: boolean;
   /** TensorGrid prices this model at zero. */
   isFree: (modelId: string) => boolean;
   /**
@@ -36,6 +38,7 @@ export default function useModelCatalog(): ModelCatalog {
     const free = new Set(data?.free ?? []);
     const categories = data?.categories ?? {};
     return {
+      ready: data != null,
       isFree: (modelId) => free.has(modelId),
       isChatModel: (modelId) => {
         const category = categories[modelId];

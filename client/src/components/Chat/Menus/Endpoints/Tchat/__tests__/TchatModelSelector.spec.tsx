@@ -13,6 +13,8 @@ let mockCategories: Record<string, string> = {};
 let mockImageSelection: boolean | string | undefined;
 let mockImageGenAvailable = true;
 const mockSelectImage = jest.fn();
+const mockShowToast = jest.fn();
+let mockCatalogReady = true;
 
 const endpoint = (value: string, label: string, models: string[]): Endpoint => ({
   value,
@@ -45,6 +47,7 @@ jest.mock('@librechat/client', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   return {
     ProviderIcon: () => null,
+    useToastContext: () => ({ showToast: mockShowToast }),
     TooltipAnchor: React.forwardRef(function MockTooltipAnchor(
       {
         render,
@@ -80,6 +83,7 @@ jest.mock('~/hooks/useKeyboardShortcuts', () => ({
 }));
 
 jest.mock('../useModelCatalog', () => () => ({
+  ready: mockCatalogReady,
   isFree: (id: string) => mockFree.has(id),
   isChatModel: (id: string) => (mockCategories[id] ?? 'language') === 'language',
 }));
@@ -147,6 +151,7 @@ describe('TchatModelSelector', () => {
     mockCategories = { 'gpt-image-2.5-c': 'image', 'text-embedding-3-small': 'embeddings' };
     mockImageSelection = undefined;
     mockImageGenAvailable = true;
+    mockCatalogReady = true;
   });
 
   it('names the model in use on the trigger, not the spec', () => {
@@ -263,6 +268,46 @@ describe('TchatModelSelector', () => {
     mockImageGenAvailable = false;
     const { dialog } = await openPicker();
     expect(within(dialog).queryByText('com_ui_image_gen')).toBeNull();
+  });
+
+  describe('a chat saved with an image model as its chat model', () => {
+    beforeEach(() => {
+      mockSelectedValues = { endpoint: 'TensorGrid', model: 'gpt-image-2.5-c', modelSpec: '' };
+    });
+
+    it('moves to a chat model and turns Image Gen on with that image model', () => {
+      render(<TchatModelSelector startupConfig={startupConfig} />);
+      expect(mockHandleSelectModel).toHaveBeenCalledTimes(1);
+      expect(mockHandleSelectModel).toHaveBeenCalledWith(
+        expect.objectContaining({ value: 'TensorGrid' }),
+        'gpt-5.6-terra',
+      );
+      expect(mockSelectImage).toHaveBeenCalledWith('gpt-image-2-5');
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'com_ui_image_model_moved' }),
+      );
+    });
+
+    it('waits for the catalog before touching the chat', () => {
+      mockCatalogReady = false;
+      render(<TchatModelSelector startupConfig={startupConfig} />);
+      expect(mockHandleSelectModel).not.toHaveBeenCalled();
+      expect(mockSelectImage).not.toHaveBeenCalled();
+    });
+
+    it('moves the chat but leaves Image Gen off where it is not configured', () => {
+      mockImageGenAvailable = false;
+      render(<TchatModelSelector startupConfig={startupConfig} />);
+      expect(mockHandleSelectModel).toHaveBeenCalledTimes(1);
+      expect(mockSelectImage).not.toHaveBeenCalled();
+    });
+  });
+
+  it('leaves a chat alone when its model is one the catalog does not know', () => {
+    mockCategories = {};
+    mockSelectedValues = { endpoint: 'TensorGrid', model: 'some-new-model', modelSpec: '' };
+    render(<TchatModelSelector startupConfig={startupConfig} />);
+    expect(mockHandleSelectModel).not.toHaveBeenCalled();
   });
 
   it('shows the agent on the trigger when an agent is selected', () => {

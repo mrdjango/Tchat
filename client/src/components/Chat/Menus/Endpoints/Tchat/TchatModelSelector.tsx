@@ -1,15 +1,18 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { useNavigate } from 'react-router-dom';
-import { TooltipAnchor } from '@librechat/client';
+import { TooltipAnchor, useToastContext } from '@librechat/client';
 import { Bot, Check, ChevronDown, ImageIcon, LayoutGrid, Pin, PinOff, Search } from 'lucide-react';
 import { getConfigDefaults, isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
 import type { TImageSpec, TModelSpec } from 'librechat-data-provider';
 import type { Endpoint, ModelSelectorProps } from '~/common';
+import type { ImageGenChoice } from './useImageGenChoice';
+import type { ModelCatalog } from './useModelCatalog';
 import { ModelSelectorProvider, useModelSelectorContext } from '../ModelSelectorContext';
 import { buildOwnerGroups, formatModelLabel, getModelOwner, getOwner } from './owners';
 import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
 import { ModelSelectorChatProvider } from '../ModelSelectorChatContext';
+import useRepairImageModelChat from './useRepairImageModelChat';
 import { useImageGenAvailable } from '~/hooks/Plugins';
 import { getSpecAgentAvatarURL, cn } from '~/utils';
 import { useFavorites, useLocalize } from '~/hooks';
@@ -113,7 +116,14 @@ function ImageMark({ size }: { size: number }) {
   );
 }
 
-function useGroups(imageSpecs: TImageSpec[]): {
+interface GroupSources {
+  imageSpecs: TImageSpec[];
+  catalog: ModelCatalog;
+  imageGenAvailable: boolean;
+  imageGen: ImageGenChoice;
+}
+
+function useGroups({ imageSpecs, catalog, imageGenAvailable, imageGen }: GroupSources): {
   groups: Group[];
   current: Current | null;
   image: ImageChoice | null;
@@ -135,9 +145,6 @@ function useGroups(imageSpecs: TImageSpec[]): {
     isFavoriteSpec,
     toggleFavoriteSpec,
   } = useFavorites();
-  const catalog = useModelCatalog();
-  const imageGenAvailable = useImageGenAvailable();
-  const imageGen = useImageGenChoice((modelSpecs?.length ?? 0) > 0);
 
   return useMemo(() => {
     const endpoints = mappedEndpoints ?? [];
@@ -416,7 +423,41 @@ function TchatModelSelectorContent({ imageSpecs }: { imageSpecs: TImageSpec[] })
   const navigate = useNavigate();
   const modelSelectorHint = useShortcutHint('openModelSelector', localize('com_ui_select_model'));
   const modelSelectorAriaKey = useShortcutAriaKey('openModelSelector');
-  const { groups, current, image } = useGroups(imageSpecs);
+  const { showToast } = useToastContext();
+  const { modelSpecs, mappedEndpoints, selectedValues, handleSelectModel } =
+    useModelSelectorContext();
+  const catalog = useModelCatalog();
+  const imageGenAvailable = useImageGenAvailable();
+  const imageGen = useImageGenChoice((modelSpecs?.length ?? 0) > 0);
+  const { groups, current, image } = useGroups({
+    imageSpecs,
+    catalog,
+    imageGenAvailable,
+    imageGen,
+  });
+
+  const onRepaired = useCallback(
+    (from: string, to: string) =>
+      showToast({
+        message: localize('com_ui_image_model_moved', {
+          0: formatModelLabel(from),
+          1: formatModelLabel(to),
+        }),
+        status: 'info',
+      }),
+    [showToast, localize],
+  );
+  useRepairImageModelChat({
+    catalog,
+    selectedValues,
+    mappedEndpoints,
+    modelSpecs,
+    imageSpecs,
+    imageGenAvailable,
+    imageGen,
+    handleSelectModel,
+    onRepaired,
+  });
 
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
