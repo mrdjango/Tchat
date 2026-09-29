@@ -30,6 +30,8 @@ export const loadConfig = () => ({
   subjectCacheSeconds: Number(optional('TCHAT_BROKER_SUBJECT_CACHE_SECONDS', '900')),
   tokenCacheSeconds: Number(optional('TCHAT_BROKER_TOKEN_CACHE_SECONDS', '3600')),
   requestTimeoutMs: Number(optional('TCHAT_BROKER_REQUEST_TIMEOUT_MS', '15000')),
+  /** How long the model picker's free-model list is reused before re-reading the catalog. */
+  catalogCacheSeconds: Number(optional('TCHAT_BROKER_CATALOG_CACHE_SECONDS', '300')),
   /** Tchat's web search and web fetch backend. Unset, those routes answer 503
    *  and inference is unaffected. */
   tinyfishApiKey: optional('TINYFISH_API_KEY', ''),

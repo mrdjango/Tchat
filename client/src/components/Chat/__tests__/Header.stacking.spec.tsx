@@ -47,6 +47,7 @@ jest.mock('../BackgroundTasks', () => ({
   BackgroundTasksButton: jest.fn(() => <div data-testid="conversation-tasks" />),
 }));
 jest.mock('../Menus/Endpoints/ModelSelector', () => () => null);
+jest.mock('../Menus/Endpoints/Tchat/TchatModelSelector', () => () => null);
 jest.mock('../ExportAndShareMenu', () => () => null);
 jest.mock('../SubagentThreadLink', () => () => null);
 jest.mock('../Menus/BookmarkMenu', () => () => null);

@@ -1599,6 +1599,7 @@
   "com_ui_fork_split_target_setting": "Start fork from target message by default",
   "com_ui_fork_success": "Successfully forked conversation",
   "com_ui_fork_visible": "Visible messages only",
+  "com_ui_free": "Free",
   "com_ui_generate_qrcode": "Generate QR Code",
   "com_ui_generating": "Generating...",
   "com_ui_generating_image": "Generating image...",
