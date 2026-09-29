@@ -244,12 +244,10 @@ modelSpecs:
     # LinkAPI answers edits and `gpt-image-2.5-c` with a hosted URL, which the
     # OpenAI image tool now downloads. Left out: token-billed
     # `gpt-image-2.5-sunburst` / `-flare`, whose LinkAPI group returns 503
-    # "上游负载已饱和" on nearly every request.
-    - name: 'gpt-image-2-draft'
-      label: 'GPT Image 2 · Draft'
-      description: 'Lower-detail GPT Image 2 at the lowest price per image.'
-      model: 'gpt-image-2-c'
-
+    # "上游负载已饱和" on nearly every request; and `gpt-image-2-c` ("GPT Image 2
+    # · Draft", removed 2026-09-29), which took 126 s in a direct test and held a
+    # Tchat request for 10 min before LinkAPI answered 504. A chat that still
+    # selects it falls back to the default entry.
     - name: 'gpt-image-2-hd'
       label: 'GPT Image 2 · HD'
       description: 'Higher-detail GPT Image 2, flat price per image.'

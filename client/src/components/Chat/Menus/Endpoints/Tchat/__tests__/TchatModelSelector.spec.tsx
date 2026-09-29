@@ -86,6 +86,7 @@ jest.mock('../useModelCatalog', () => () => ({
   ready: mockCatalogReady,
   isFree: (id: string) => mockFree.has(id),
   isChatModel: (id: string) => (mockCategories[id] ?? 'language') === 'language',
+  isImageModel: (id: string) => mockCategories[id] === 'image',
 }));
 
 jest.mock('../useImageGenChoice', () => () => ({
