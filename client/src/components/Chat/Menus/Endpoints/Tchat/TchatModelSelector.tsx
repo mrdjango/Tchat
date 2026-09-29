@@ -1,0 +1,601 @@
+import React, { useCallback, useMemo, useState } from 'react';
+import * as Ariakit from '@ariakit/react';
+import { useNavigate } from 'react-router-dom';
+import { TooltipAnchor } from '@librechat/client';
+import { Bot, Check, ChevronDown, LayoutGrid, Pin, PinOff, Search } from 'lucide-react';
+import { getConfigDefaults, isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
+import type { TModelSpec } from 'librechat-data-provider';
+import type { Endpoint, ModelSelectorProps } from '~/common';
+import { ModelSelectorProvider, useModelSelectorContext } from '../ModelSelectorContext';
+import { buildOwnerGroups, formatModelLabel, getModelOwner, getOwner } from './owners';
+import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
+import { ModelSelectorChatProvider } from '../ModelSelectorChatContext';
+import { getSpecAgentAvatarURL, cn } from '~/utils';
+import { useFavorites, useLocalize } from '~/hooks';
+import SpecIcon from '../components/SpecIcon';
+import useFreeModels from './useFreeModels';
+import OwnerMark from './OwnerMark';
+
+const defaultInterface = getConfigDefaults().interface;
+const ALL = 'all';
+
+interface Row {
+  key: string;
+  label: string;
+  /** The raw model id, printed under the label so nothing is hidden by formatting. */
+  detail?: string;
+  /** Leading art, for rows whose group mark does not already say what they are. */
+  mark?: React.ReactNode;
+  selected: boolean;
+  /** TensorGrid prices this model at zero. */
+  free?: boolean;
+  onSelect: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
+  searchText: string;
+}
+
+interface Group {
+  id: string;
+  label: string;
+  caption?: string;
+  mark: React.ReactNode;
+  rows: Row[];
+  /** Agents end with the marketplace, as in the stock selector. */
+  marketplace?: boolean;
+}
+
+interface Current {
+  label: string;
+  caption?: string;
+  detail?: string;
+  free?: boolean;
+  mark: React.ReactNode;
+  /** Rail entry that owns the current selection. */
+  groupId?: string;
+}
+
+const isAgentLike = (value?: string | null) =>
+  isAgentsEndpoint(value) || isAssistantsEndpoint(value);
+
+function EndpointArt({ endpoint, id, size }: { endpoint: Endpoint; id?: string; size: number }) {
+  const avatar = id ? endpoint.modelIcons?.[id] : undefined;
+  return (
+    <span
+      aria-hidden="true"
+      style={{ width: size, height: size }}
+      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border-light bg-surface-primary text-text-primary"
+    >
+      {avatar ? (
+        <img src={avatar} alt="" className="h-full w-full object-cover" />
+      ) : (
+        (endpoint.icon ?? <Bot className="size-4" />)
+      )}
+    </span>
+  );
+}
+
+function SpecArt({ spec, size }: { spec: TModelSpec; size: number }) {
+  const { endpointsConfig, agentsMap } = useModelSelectorContext();
+  return (
+    <span
+      aria-hidden="true"
+      style={{ width: size, height: size }}
+      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border-light bg-surface-primary"
+    >
+      <SpecIcon
+        currentSpec={spec}
+        endpointsConfig={endpointsConfig}
+        agentAvatarURL={getSpecAgentAvatarURL(spec, agentsMap)}
+      />
+    </span>
+  );
+}
+
+function useGroups(): { groups: Group[]; current: Current | null } {
+  const localize = useLocalize();
+  const {
+    agentsMap,
+    modelSpecs,
+    mappedEndpoints,
+    selectedValues,
+    handleSelectSpec,
+    handleSelectModel,
+  } = useModelSelectorContext();
+  const {
+    isFavoriteModel,
+    toggleFavoriteModel,
+    isFavoriteAgent,
+    toggleFavoriteAgent,
+    isFavoriteSpec,
+    toggleFavoriteSpec,
+  } = useFavorites();
+  const freeModels = useFreeModels();
+
+  return useMemo(() => {
+    const endpoints = mappedEndpoints ?? [];
+    const { endpoint: selEndpoint, model: selModel, modelSpec: selSpec } = selectedValues;
+    const ownerGroups = buildOwnerGroups(endpoints);
+    const listed = new Set(ownerGroups.flatMap((g) => g.models.map((m) => m.modelId)));
+
+    const groups: Group[] = [];
+
+    /** A spec that only names an endpoint and a listed model is that model's row; the rest stay presets. */
+    const presets = (modelSpecs ?? []).filter(
+      (spec) =>
+        isAgentLike(spec.preset?.endpoint) || !spec.preset?.model || !listed.has(spec.preset.model),
+    );
+    if (presets.length > 0) {
+      groups.push({
+        id: 'presets',
+        label: localize('com_endpoint_presets'),
+        mark: <SpecArt spec={presets[0]} size={20} />,
+        rows: presets.map((spec) => ({
+          key: `spec::${spec.name}`,
+          label: spec.label || spec.name,
+          detail: spec.description,
+          mark: <SpecArt spec={spec} size={28} />,
+          selected: selSpec === spec.name,
+          onSelect: () => handleSelectSpec(spec),
+          pinned: isFavoriteSpec(spec.name),
+          onTogglePin: () => toggleFavoriteSpec(spec.name),
+          searchText: [spec.label, spec.name, spec.description].join(' ').toLowerCase(),
+        })),
+      });
+    }
+
+    for (const { owner, models } of ownerGroups) {
+      groups.push({
+        id: owner.id,
+        label: owner.label,
+        caption: owner.family,
+        mark: <OwnerMark owner={owner.id} size={20} />,
+        rows: models.map((model) => ({
+          key: model.key,
+          label: model.label,
+          detail: model.modelId,
+          selected: !isAgentLike(selEndpoint) && selModel === model.modelId,
+          free: freeModels.has(model.modelId),
+          onSelect: () => handleSelectModel(model.endpoint, model.modelId),
+          pinned: isFavoriteModel(model.modelId, model.endpoint.value),
+          onTogglePin: () =>
+            toggleFavoriteModel({ model: model.modelId, endpoint: model.endpoint.value }),
+          /** A free model also answers a search for the tag's own word. */
+          searchText: [
+            model.label,
+            model.modelId,
+            owner.label,
+            owner.family,
+            freeModels.has(model.modelId) ? localize('com_ui_free') : '',
+          ]
+            .join(' ')
+            .toLowerCase(),
+        })),
+      });
+    }
+
+    for (const endpoint of endpoints) {
+      if (!isAgentLike(endpoint.value)) {
+        continue;
+      }
+      const isAgents = isAgentsEndpoint(endpoint.value);
+      const ids = (endpoint.models ?? []).map((m) => m.name);
+      if (ids.length === 0 && endpoint.showMarketplace !== true) {
+        continue;
+      }
+      groups.push({
+        id: `endpoint::${endpoint.value}`,
+        label: endpoint.label,
+        mark: <EndpointArt endpoint={endpoint} size={20} />,
+        marketplace: endpoint.showMarketplace === true,
+        rows: ids.map((id) => {
+          const name =
+            endpoint.agentNames?.[id] ??
+            endpoint.assistantNames?.[id] ??
+            agentsMap?.[id]?.name ??
+            id;
+          return {
+            key: `${endpoint.value}::${id}`,
+            label: name,
+            mark: <EndpointArt endpoint={endpoint} id={id} size={28} />,
+            selected: selEndpoint === endpoint.value && selModel === id,
+            onSelect: () => handleSelectModel(endpoint, id),
+            pinned: isAgents ? isFavoriteAgent(id) : undefined,
+            onTogglePin: isAgents ? () => toggleFavoriteAgent(id) : undefined,
+            searchText: [name, endpoint.label].join(' ').toLowerCase(),
+          };
+        }),
+      });
+    }
+
+    let current: Current | null = null;
+    const selectedEndpoint = endpoints.find((e) => e.value === selEndpoint);
+    if (selEndpoint && isAgentLike(selEndpoint) && selModel && selectedEndpoint) {
+      current = {
+        label:
+          selectedEndpoint.agentNames?.[selModel] ??
+          selectedEndpoint.assistantNames?.[selModel] ??
+          agentsMap?.[selModel]?.name ??
+          selModel,
+        caption: selectedEndpoint.label,
+        mark: <EndpointArt endpoint={selectedEndpoint} id={selModel} size={24} />,
+        groupId: `endpoint::${selEndpoint}`,
+      };
+    } else if (selModel) {
+      const owner = getOwner(getModelOwner(selModel));
+      current = {
+        label: formatModelLabel(selModel),
+        caption: owner.label,
+        detail: selModel,
+        free: freeModels.has(selModel),
+        mark: <OwnerMark owner={owner.id} size={24} />,
+        groupId: owner.id,
+      };
+    } else if (selSpec) {
+      const spec = (modelSpecs ?? []).find((s) => s.name === selSpec);
+      if (spec) {
+        current = {
+          label: spec.label || spec.name,
+          mark: <SpecArt spec={spec} size={24} />,
+          groupId: 'presets',
+        };
+      }
+    }
+
+    return { groups, current };
+  }, [
+    localize,
+    agentsMap,
+    modelSpecs,
+    mappedEndpoints,
+    selectedValues,
+    handleSelectSpec,
+    handleSelectModel,
+    isFavoriteModel,
+    toggleFavoriteModel,
+    isFavoriteAgent,
+    toggleFavoriteAgent,
+    isFavoriteSpec,
+    toggleFavoriteSpec,
+    freeModels,
+  ]);
+}
+
+/** Marks a model TensorGrid prices at zero. */
+function FreeTag({ className }: { className?: string }) {
+  const localize = useLocalize();
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center rounded-full border border-border-medium px-1.5 text-[11px] font-medium leading-4 text-text-primary',
+        className,
+      )}
+    >
+      {localize('com_ui_free')}
+    </span>
+  );
+}
+
+function ModelRow({ row, onPicked }: { row: Row; onPicked: () => void }) {
+  const localize = useLocalize();
+  return (
+    <Ariakit.ComboboxItem
+      focusOnHover
+      setValueOnClick={false}
+      hideOnClick={false}
+      onClick={() => {
+        row.onSelect();
+        onPicked();
+      }}
+      className={cn(
+        'group relative flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-1.5 text-left outline-none',
+        'data-[active-item]:bg-surface-hover',
+        row.selected
+          ? 'border-border-medium bg-surface-active-alt'
+          : 'border-transparent hover:bg-surface-hover',
+      )}
+    >
+      {row.mark}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium text-text-primary">{row.label}</span>
+          {row.free && <FreeTag />}
+        </span>
+        {row.detail && (
+          <span className="truncate font-mono text-xs text-text-secondary">{row.detail}</span>
+        )}
+      </span>
+      {row.onTogglePin && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation();
+            row.onTogglePin?.();
+          }}
+          aria-label={row.pinned ? localize('com_ui_unpin') : localize('com_ui_pin')}
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-active hover:text-text-primary',
+            row.pinned
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100 group-data-[active-item]:opacity-100',
+          )}
+        >
+          {row.pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+        </button>
+      )}
+      {row.selected && (
+        <>
+          <Check className="size-4 shrink-0 text-text-primary" aria-hidden="true" />
+          <Ariakit.VisuallyHidden>{localize('com_ui_current')}</Ariakit.VisuallyHidden>
+        </>
+      )}
+    </Ariakit.ComboboxItem>
+  );
+}
+
+function TchatModelSelectorContent() {
+  const localize = useLocalize();
+  const navigate = useNavigate();
+  const modelSelectorHint = useShortcutHint('openModelSelector', localize('com_ui_select_model'));
+  const modelSelectorAriaKey = useShortcutAriaKey('openModelSelector');
+  const { groups, current } = useGroups();
+
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<string>(ALL);
+
+  const close = useCallback(() => setOpen(false), []);
+  const onOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    if (!next) {
+      setSearch('');
+      setFilter(ALL);
+    }
+  }, []);
+
+  const term = search.trim().toLowerCase();
+  const marketplaceLabel = localize('com_agents_marketplace');
+  const visible = useMemo(
+    () =>
+      groups
+        .filter((group) => filter === ALL || group.id === filter)
+        .map((group) => ({
+          ...group,
+          rows: term ? group.rows.filter((row) => row.searchText.includes(term)) : group.rows,
+          marketplace:
+            group.marketplace === true &&
+            (!term ||
+              marketplaceLabel.toLowerCase().includes(term) ||
+              'marketplace'.includes(term)),
+        }))
+        .filter((group) => group.rows.length > 0 || group.marketplace),
+    [groups, filter, term, marketplaceLabel],
+  );
+  const total = groups.reduce((sum, group) => sum + group.rows.length, 0);
+  const showCurrent = current != null && !term && filter === ALL;
+
+  const trigger = (
+    <TooltipAnchor
+      description={modelSelectorHint}
+      render={
+        <button
+          type="button"
+          data-testid="model-selector-button"
+          aria-keyshortcuts={modelSelectorAriaKey}
+          aria-label={
+            current
+              ? `${localize('com_ui_select_model')}: ${current.label}`
+              : localize('com_ui_select_model')
+          }
+          className={cn(
+            'my-1 flex h-9 max-w-full items-center gap-2 rounded-xl border border-border-light py-1 pl-1.5 pr-2.5 text-sm text-text-primary',
+            open ? 'bg-surface-active-alt' : 'bg-presentation hover:bg-surface-active-alt',
+          )}
+        >
+          {current?.mark}
+          <span className="truncate text-left font-medium">
+            {current?.label ?? localize('com_ui_select_model')}
+          </span>
+          {current?.caption && (
+            <span className="hidden shrink-0 text-text-secondary sm:inline">{current.caption}</span>
+          )}
+          {current?.free && <FreeTag />}
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              'size-4 shrink-0 text-text-secondary transition-transform',
+              open && 'rotate-180',
+            )}
+          />
+        </button>
+      }
+    />
+  );
+
+  return (
+    <div className="relative flex min-w-0 max-w-[60vw] flex-col items-center gap-2 sm:max-w-md">
+      <Ariakit.PopoverProvider open={open} setOpen={onOpenChange} placement="bottom-start">
+        <Ariakit.PopoverDisclosure render={trigger} />
+        <Ariakit.Popover
+          portal
+          gutter={6}
+          unmountOnHide
+          aria-label={localize('com_ui_select_model')}
+          className={cn(
+            'animate-popover z-50 flex flex-col overflow-hidden rounded-2xl border border-border-light bg-presentation text-text-primary shadow-lg outline-none',
+            'max-h-[min(560px,var(--popover-available-height,560px))] w-[min(720px,calc(100vw-1rem))]',
+          )}
+        >
+          <Ariakit.ComboboxProvider value={search} setValue={setSearch} includesBaseElement={false}>
+            <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-light px-4">
+              <Search className="size-4 shrink-0 text-text-secondary" aria-hidden="true" />
+              <Ariakit.Combobox
+                autoSelect
+                aria-label={localize('com_endpoint_search_models')}
+                placeholder={localize('com_endpoint_search_models')}
+                className="h-full w-full border-none bg-transparent text-base text-text-primary outline-none placeholder:text-text-secondary focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 sm:text-sm"
+              />
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+              <nav
+                aria-label={localize('com_ui_provider')}
+                className="flex shrink-0 gap-1 overflow-x-auto border-b border-border-light p-2 sm:w-48 sm:flex-col sm:overflow-y-auto sm:overflow-x-hidden sm:border-b-0 sm:border-r"
+              >
+                <RailButton
+                  active={filter === ALL}
+                  onClick={() => setFilter(ALL)}
+                  label={localize('com_ui_all_proper')}
+                  count={total}
+                />
+                {groups.map((group) => (
+                  <RailButton
+                    key={group.id}
+                    active={filter === group.id}
+                    onClick={() => setFilter(group.id)}
+                    label={group.label}
+                    mark={group.mark}
+                    count={group.rows.length}
+                    isCurrent={current?.groupId === group.id}
+                  />
+                ))}
+              </nav>
+
+              <Ariakit.ComboboxList
+                alwaysVisible
+                className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2"
+              >
+                {showCurrent && current && (
+                  <div className="flex items-center gap-3 rounded-xl border border-border-medium bg-surface-active-alt px-3 py-2.5">
+                    {current.mark}
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-semibold">{current.label}</span>
+                        {current.free && <FreeTag />}
+                      </span>
+                      <span className="truncate text-xs text-text-secondary">
+                        {[current.caption, current.detail].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-text-secondary">
+                      <Check className="size-4 text-text-primary" aria-hidden="true" />
+                      {localize('com_ui_current')}
+                    </span>
+                  </div>
+                )}
+
+                {visible.map((group) => (
+                  <Ariakit.ComboboxGroup key={group.id} className="flex flex-col gap-0.5">
+                    <Ariakit.ComboboxGroupLabel className="sticky -top-2 z-10 flex items-center gap-2 bg-presentation px-1 py-1.5">
+                      {group.mark}
+                      <span className="text-xs font-semibold text-text-primary">{group.label}</span>
+                      <span className="text-xs text-text-secondary">
+                        {[group.caption, group.rows.length]
+                          .filter((v) => v != null && v !== '')
+                          .join(' · ')}
+                      </span>
+                    </Ariakit.ComboboxGroupLabel>
+                    {group.rows.map((row) => (
+                      <ModelRow key={row.key} row={row} onPicked={close} />
+                    ))}
+                    {group.marketplace && (
+                      <Ariakit.ComboboxItem
+                        focusOnHover
+                        setValueOnClick={false}
+                        hideOnClick={false}
+                        data-testid="model-selector-marketplace-item"
+                        onClick={() => {
+                          close();
+                          navigate('/agents');
+                        }}
+                        className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm outline-none hover:bg-surface-hover data-[active-item]:bg-surface-hover"
+                      >
+                        <LayoutGrid className="size-5 text-text-primary" aria-hidden="true" />
+                        <span className="truncate">{marketplaceLabel}</span>
+                      </Ariakit.ComboboxItem>
+                    )}
+                  </Ariakit.ComboboxGroup>
+                ))}
+
+                {visible.length === 0 && (
+                  <div className="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-text-secondary">
+                    <span>{localize('com_ui_no_results_found')}</span>
+                    {filter !== ALL && (
+                      <button
+                        type="button"
+                        onClick={() => setFilter(ALL)}
+                        className="rounded-lg border border-border-light px-3 py-1.5 text-text-primary hover:bg-surface-hover"
+                      >
+                        {localize('com_ui_all_proper')}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </Ariakit.ComboboxList>
+            </div>
+          </Ariakit.ComboboxProvider>
+        </Ariakit.Popover>
+      </Ariakit.PopoverProvider>
+    </div>
+  );
+}
+
+function RailButton({
+  active,
+  onClick,
+  label,
+  mark,
+  count,
+  isCurrent = false,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  mark?: React.ReactNode;
+  count: number;
+  isCurrent?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'flex h-9 shrink-0 items-center gap-2 rounded-lg px-2 text-left text-sm sm:w-full',
+        active
+          ? 'bg-surface-active-alt font-medium text-text-primary'
+          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
+      )}
+    >
+      {mark}
+      <span className="truncate sm:flex-1">{label}</span>
+      {isCurrent && (
+        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-text-primary" />
+      )}
+      <span className="shrink-0 text-xs text-text-secondary">{count}</span>
+    </button>
+  );
+}
+
+/**
+ * Tchat's model selector: models grouped by the company that makes them, with
+ * the model in use named on the trigger. Selection, specs, agents and pins all
+ * go through the stock ModelSelector context, so conversation state is untouched.
+ */
+export default function TchatModelSelector({ startupConfig }: ModelSelectorProps) {
+  const interfaceConfig = startupConfig?.interface ?? defaultInterface;
+  const modelSpecs = startupConfig?.modelSpecs?.list ?? [];
+
+  if (interfaceConfig.modelSelect === false && modelSpecs.length === 0) {
+    return null;
+  }
+
+  return (
+    <ModelSelectorChatProvider>
+      <ModelSelectorProvider startupConfig={startupConfig}>
+        <TchatModelSelectorContent />
+      </ModelSelectorProvider>
+    </ModelSelectorChatProvider>
+  );
+}
