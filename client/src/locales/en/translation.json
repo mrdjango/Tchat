@@ -976,6 +976,7 @@
   "com_nav_mcp_vars_update_error": "Error updating MCP custom user variables",
   "com_nav_mcp_vars_updated": "MCP custom user variables updated successfully.",
   "com_nav_modular_chat": "Enable switching Endpoints mid-conversation",
+  "com_nav_credit": "Credit: {{0}}",
   "com_nav_my_files": "My Files",
   "com_nav_new_chat_switch_to_history": "Switch to Chat History on new chat",
   "com_nav_not_supported": "Not Supported",

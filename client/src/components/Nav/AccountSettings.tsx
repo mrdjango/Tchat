@@ -19,6 +19,7 @@ import { filesDialogTriggerAtom, showFilesDialogAtom } from '~/store/filesDialog
 import { useGetStartupConfig } from '~/data-provider';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { settingsOpenAtom } from './Settings';
+import useTchatCredit from './useTchatCredit';
 import { openInNewTab } from '~/utils';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
@@ -98,6 +99,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
   const localize = useLocalize();
   const { user, logout } = useAuthContext();
   const { data: startupConfig } = useGetStartupConfig();
+  const credit = useTchatCredit();
   const setShowSettings = useSetAtom(settingsOpenAtom);
   const setShowFiles = useSetAtom(showFilesDialogAtom);
   const setFilesDialogTrigger = useSetAtom(filesDialogTriggerAtom);
@@ -128,6 +130,11 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
             style={{ marginTop: '0', marginLeft: '0' }}
           >
             {user?.name ?? user?.username ?? localize('com_nav_user')}
+            {credit && (
+              <div className="text-text-secondary text-xs" data-testid="nav-credit">
+                {localize('com_nav_credit', { 0: credit })}
+              </div>
+            )}
           </div>
         )}
       </Menu.MenuButton>
@@ -141,6 +148,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
       >
         <div className="text-text-secondary mr-2 ml-3 py-2 text-sm" role="note">
           {user?.email ?? localize('com_nav_user')}
+          {credit && <div>{localize('com_nav_credit', { 0: credit })}</div>}
         </div>
         <DropdownMenuSeparator />
         <HelpSubmenu
