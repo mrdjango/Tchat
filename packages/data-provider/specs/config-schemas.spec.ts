@@ -28,6 +28,7 @@ import {
   setMaxSubagents,
   traceViewerDefaults,
   resolveTraceViewerConfig,
+  outboundTimeoutsSchema,
 } from '../src/config';
 import {
   tModelSpecPresetSchema,
@@ -2183,5 +2184,28 @@ describe('errorReportingConfigSchema', () => {
       errorReporting: { client: { enabled: true, sampleRate: 0.25 } },
     });
     expect(parsed.success && parsed.data.errorReporting?.client.sampleRate).toBe(0.25);
+  });
+});
+
+describe('passwordHashing config', () => {
+  it.each([1, 4, 32])('accepts %s hash workers', (maxWorkers) => {
+    expect(configSchema.shape.passwordHashing.parse({ maxWorkers })).toEqual({ maxWorkers });
+  });
+
+  it.each([0, 33, 1.5])('rejects %s hash workers', (maxWorkers) => {
+    expect(configSchema.shape.passwordHashing.safeParse({ maxWorkers }).success).toBe(false);
+  });
+});
+
+describe('outboundTimeoutsSchema', () => {
+  it('accepts budgets within the Node timer range', () => {
+    expect(outboundTimeoutsSchema.parse({ ragMs: 3_000, ocrMs: 2_147_483_647 })).toEqual({
+      ragMs: 3_000,
+      ocrMs: 2_147_483_647,
+    });
+  });
+
+  it.each([0, -1, 1.5, 2_147_483_648])('rejects %s, which no timer could honor', (value) => {
+    expect(outboundTimeoutsSchema.safeParse({ actionsMs: value }).success).toBe(false);
   });
 });

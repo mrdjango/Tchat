@@ -50,7 +50,6 @@ const {
   // Basic Tools
   GoogleSearchAPI,
   // Structured Tools
-  DALLE3,
   FluxAPI,
   OpenWeather,
   StructuredSD,
@@ -130,7 +129,6 @@ const getAuthFields = (toolKey) => {
  * @param {LoadToolOptions} [params.options]
  * @param {boolean} [params.useSpecs]
  * @param {Array<string>} params.tools
- * @param {boolean} [params.functions]
  * @param {boolean} [params.returnMap]
  * @param {AppConfig['webSearch']} [params.webSearch]
  * @param {AppConfig['fileStrategy']} [params.fileStrategy]
@@ -146,7 +144,6 @@ const loadTools = async ({
   userMCPAuthMap,
   tools = [],
   options = {},
-  functions = true,
   returnMap = false,
   webSearch,
   fileStrategy,
@@ -245,10 +242,6 @@ const loadTools = async ({
     : true;
   let loggedMCPDenied = false;
 
-  if (functions === true) {
-    toolConstructors.dalle = DALLE3;
-  }
-
   /** @type {ImageGenOptions} */
   const imageGenOptions = {
     isAgent: !!agent,
@@ -259,9 +252,15 @@ const loadTools = async ({
     uploadImageBuffer: options.uploadImageBuffer,
   };
 
+  const timeoutOptions = { timeouts: options.req?.config?.timeouts };
+
   const toolOptions = {
+    google: timeoutOptions,
+    wolfram: timeoutOptions,
+    open_weather: timeoutOptions,
+    traversaal_search: timeoutOptions,
+    tavily_search_results_json: timeoutOptions,
     flux: imageGenOptions,
-    dalle: imageGenOptions,
     'stable-diffusion': imageGenOptions,
     gemini_image_gen: imageGenOptions,
   };
@@ -488,9 +487,17 @@ const loadTools = async ({
        *  (a user-DB server may be named exactly like an operator server's
        *  normalized form); only when nothing resolves is the parsed name
        *  treated as a normalized spelling of a raw config name. */
+      const requestUser = options.req?.user;
+      const lookup = { idOnTheSource: requestUser?.idOnTheSource };
       let serverName = parsedServerName;
       let serverConfig = serverName
-        ? await getMCPServersRegistry().getServerConfig(serverName, user, configServers)
+        ? await getMCPServersRegistry().getServerConfig(
+            serverName,
+            user,
+            configServers,
+            requestUser?.role,
+            lookup,
+          )
         : null;
       if (!serverConfig && serverName != null) {
         const aliasedName = serverNameAliases.get(serverName);
@@ -499,6 +506,8 @@ const loadTools = async ({
             aliasedName,
             user,
             configServers,
+            requestUser?.role,
+            lookup,
           );
           if (serverConfig) {
             serverName = aliasedName;
