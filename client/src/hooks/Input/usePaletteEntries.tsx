@@ -2,6 +2,7 @@ import React, { useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAtom } from 'jotai';
 import { useSetRecoilState } from 'recoil';
 import { MCPIcon } from '@librechat/client';
+import { pendingManualSkillsByConvoId } from '@librechat/chat/react';
 import {
   Brain,
   Globe,
@@ -38,7 +39,6 @@ import {
 } from '~/hooks';
 import { imageOptionChips } from '~/components/Chat/Menus/Endpoints/Tchat/imageOptionChips';
 import { imageChoicesAtom } from '~/components/Chat/Menus/Endpoints/Tchat/imageOptions';
-import { pendingManualSkillsByConvoId } from '~/components/Chat/Input/Composer/state';
 import { getStatusColor, getStatusTextKey } from '~/components/MCP/mcpServerUtils';
 import { filterSkillsForPopover } from '~/components/Chat/Input/SkillsCommand';
 import { useSkillsInfiniteQuery, useGetStartupConfig } from '~/data-provider';

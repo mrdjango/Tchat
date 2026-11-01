@@ -17,8 +17,8 @@ import type {
   TModelSpec,
 } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
-import type { IsUnmodifiedAppMCPServer } from '~/agents/lookup';
 import type { MCPClientCapabilityProfile } from '~/mcp/capabilities';
+import type { IsUnmodifiedAppMCPServer } from '~/agents/lookup';
 import type { ParsedServerConfig } from '~/mcp/types';
 import { ASK_USER_QUESTION_TOOL_NAME } from '~/agents/hitl/askUserQuestionTool';
 import { resolveMCPClientCapabilityProfile } from '~/mcp/capabilities';
@@ -26,7 +26,9 @@ import { synthesizeBackgroundToolOptions } from '~/agents/background';
 import { mergeSynthesizedToolOptions } from '~/agents/selection';
 import { synthesizeIntentToolOptions } from '~/agents/intent';
 import { filterChatSelectableMCPServers } from '~/mcp/utils';
+import { getLookupConcurrency } from '~/utils/concurrency';
 import { getCustomEndpointConfig } from '~/app/config';
+import { mapWithConcurrency } from '~/utils/promise';
 import { getMCPToolsLookup } from '~/agents/lookup';
 import { resolveImageSpec } from '~/images/specs';
 import { getPinnedTools } from '~/agents/pinned';
@@ -268,32 +270,29 @@ export async function loadAddedAgent(
     tools.push(imageSpec.toolName);
   }
 
-  const addedServers = new Set<string>();
-  for (const mcpServer of mcpServers) {
-    if (addedServers.has(mcpServer)) {
-      continue;
-    }
-    /** Address durable catalogs by the effective request overlay; request-scoped
-     *  overlays still expand fresh through `mcp_all`. */
-    const lookup = await getMCPToolsLookup(
-      mcpServer,
-      appConfig?.mcpConfig?.[mcpServer],
-      deps.isUnmodifiedAppMCPServer,
-    );
-    const serverTools = lookup.requestScoped
-      ? null
-      : await deps.getMCPServerTools(userId, mcpServer, lookup.serverConfig, capabilityProfile);
-    if (!serverTools && optionalServers.has(mcpServer)) {
-      logger.warn(`[loadAddedAgent] Skipping pinned MCP server "${mcpServer}": no tools`);
-      continue;
-    }
-    if (!serverTools) {
-      tools.push(`${mcp_all}${mcp_delimiter}${mcpServer}`);
-      addedServers.add(mcpServer);
-      continue;
-    }
-    tools.push(...Object.keys(serverTools));
-    addedServers.add(mcpServer);
+  const serverToolKeys = await mapWithConcurrency(
+    [...mcpServers],
+    getLookupConcurrency(appConfig, 'mcpCatalogLookups'),
+    async (mcpServer): Promise<string[]> => {
+      /** Address durable catalogs by the effective request overlay; request-scoped
+       *  overlays still expand fresh through `mcp_all`. */
+      const lookup = await getMCPToolsLookup(
+        mcpServer,
+        appConfig?.mcpConfig?.[mcpServer],
+        deps.isUnmodifiedAppMCPServer,
+      );
+      const serverTools = lookup.requestScoped
+        ? null
+        : await deps.getMCPServerTools(userId, mcpServer, lookup.serverConfig, capabilityProfile);
+      if (!serverTools && optionalServers.has(mcpServer)) {
+        logger.warn(`[loadAddedAgent] Skipping pinned MCP server "${mcpServer}": no tools`);
+        return [];
+      }
+      return serverTools ? Object.keys(serverTools) : [`${mcp_all}${mcp_delimiter}${mcpServer}`];
+    },
+  );
+  for (const keys of serverToolKeys) {
+    tools.push(...keys);
   }
 
   const model_parameters: Record<string, unknown> = {};
