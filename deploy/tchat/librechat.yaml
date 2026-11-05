@@ -177,6 +177,16 @@ endpoints:
       # (checked 2026-10-17), so no conversation got a title. gpt-6-luna is the
       # default chat model, so it is served whenever chat works at all.
       titleModel: 'gpt-6-luna'
+      # Caps the context Tchat sends for gpt-6-astra (window 1.05M) so long chats
+      # are summarized before the Gateway's 272k long-context tier (2x input)
+      # and its gpt-6-astra prompt cap (300k). Unlisted models keep the built-in
+      # windows. Rates are the Gateway's standard-tier sell prices, USD per 1M.
+      tokenConfig:
+        gpt-6-astra:
+          prompt: 1.9379
+          completion: 9.6896
+          cacheRead: 0.1938
+          context: 250000
       modelDisplayLabel: 'TensorGrid'
       iconURL: '/images/tchat-mark.svg'
 
@@ -212,6 +222,16 @@ endpoints:
       titleModel: 'claude-haiku-4-5'
       modelDisplayLabel: 'TensorGrid Claude'
       iconURL: '/images/tchat-mark.svg'
+
+# Long chats are summarized once they outgrow the model's context budget. The
+# summary runs on gpt-6-luna (cheap) instead of the chat's own model, and the
+# newest two turns stay verbatim.
+summarization:
+  enabled: true
+  provider: 'TensorGrid'
+  model: 'gpt-6-luna'
+  retainRecent:
+    turns: 2
 
 # Starting points, not a whitelist. Provider lockdown is done by there being
 # exactly two endpoints, both aimed at the broker, with no provider API key
