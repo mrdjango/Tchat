@@ -177,15 +177,137 @@ endpoints:
       # (checked 2026-10-17), so no conversation got a title. gpt-6-luna is the
       # default chat model, so it is served whenever chat works at all.
       titleModel: 'gpt-6-luna'
-      # Caps the context Tchat sends for gpt-6-astra (window 1.05M) so long chats
-      # are summarized before the Gateway's 272k long-context tier (2x input)
-      # and its gpt-6-astra prompt cap (300k). Unlisted models keep the built-in
-      # windows. Rates are the Gateway's standard-tier sell prices, USD per 1M.
+      # Caps every model whose built-in window exceeds 250k (1M-class GPT, Claude,
+      # Gemini, Grok, DeepSeek, MiniMax) at 250k, so long chats are summarized
+      # before the Gateway's 272k long-context tier (2x input) and its
+      # gpt-6-astra prompt cap (300k). Models with smaller windows are left out:
+      # an entry here replaces the built-in window, it never only lowers it.
+      # Rates are the Gateway's standard-tier sell prices, USD per 1M tokens.
       tokenConfig:
-        gpt-6-astra:
+        'gpt-6-astra':
           prompt: 1.9379
           completion: 9.6896
           cacheRead: 0.1938
+          context: 250000
+        'gpt-6-sol':
+          prompt: 0.4
+          completion: 2.0
+          cacheRead: 0.04
+          context: 250000
+        'gpt-6-luna':
+          prompt: 0.1
+          completion: 0.5
+          cacheRead: 0.01
+          context: 250000
+        'gpt-6.1-sol':
+          prompt: 0.4
+          completion: 2.0
+          cacheRead: 0.02
+          context: 250000
+        'gpt-5.6-sol':
+          prompt: 0.5
+          completion: 2.5
+          cacheRead: 0.05
+          context: 250000
+        'gpt-5.6-terra':
+          prompt: 0.25
+          completion: 1.5
+          cacheRead: 0.025
+          context: 250000
+        'gpt-5.6-luna':
+          prompt: 0.16
+          completion: 0.75
+          cacheRead: 0.013
+          context: 250000
+        'claude-fable-5':
+          prompt: 1.3334
+          completion: 6.667
+          cacheRead: 0.13334
+          context: 250000
+        'claude-opus-5-5':
+          prompt: 0.5556
+          completion: 2.778
+          cacheRead: 0.05556
+          context: 250000
+        'claude-opus-5':
+          prompt: 0.5556
+          completion: 2.778
+          cacheRead: 0.05556
+          context: 250000
+        'claude-opus-4-8':
+          prompt: 0.6666
+          completion: 3.333
+          cacheRead: 0.06666
+          context: 250000
+        'claude-opus-4-7':
+          prompt: 0.6666
+          completion: 3.333
+          cacheRead: 0.06666
+          context: 250000
+        'claude-opus-4-6':
+          prompt: 0.6666
+          completion: 3.333
+          cacheRead: 0.06666
+          context: 250000
+        'claude-sonnet-5-5':
+          prompt: 0.2666
+          completion: 1.333
+          cacheRead: 0.02666
+          context: 250000
+        'claude-sonnet-5':
+          prompt: 0.2666
+          completion: 1.333
+          cacheRead: 0.02666
+          context: 250000
+        'claude-sonnet-4-6':
+          prompt: 0.4
+          completion: 2.0
+          cacheRead: 0.04
+          context: 250000
+        'deepseek-v4-pro':
+          prompt: 1.32
+          completion: 3.96
+          cacheRead: 0.044
+          context: 250000
+        'gemini-3.8-flash-high':
+          prompt: 0.0675
+          completion: 0.27
+          context: 250000
+        'gemini-3.5-flash-lite':
+          prompt: 0.0675
+          completion: 0.27
+          context: 250000
+        'gemini-3.1-flash-lite':
+          prompt: 0.0675
+          completion: 0.27
+          context: 250000
+        'gemini-3-flash':
+          prompt: 0.0675
+          completion: 0.27
+          context: 250000
+        'grok-4.7-build-fast':
+          prompt: 0.1
+          completion: 0.2
+          context: 250000
+        'grok-4.7':
+          prompt: 0.1
+          completion: 0.2
+          context: 250000
+        'grok-4.6':
+          prompt: 0.1
+          completion: 0.2
+          context: 250000
+        'grok-4.5':
+          prompt: 0.1
+          completion: 0.2
+          context: 250000
+        'x-ai/grok-4.6':
+          prompt: 0.1
+          completion: 0.2
+          context: 250000
+        'minimaxai/minimax-m3':
+          prompt: 0.0
+          completion: 0.0
           context: 250000
       modelDisplayLabel: 'TensorGrid'
       iconURL: '/images/tchat-mark.svg'
@@ -220,6 +342,43 @@ endpoints:
           - 'claude-haiku-4-5'
       titleConvo: true
       titleModel: 'claude-haiku-4-5'
+      # Same 250k cap as the TensorGrid endpoint above, for its 1M-window models.
+      tokenConfig:
+        'claude-fable-5':
+          prompt: 1.3334
+          completion: 6.667
+          cacheRead: 0.13334
+          context: 250000
+        'claude-opus-5':
+          prompt: 0.5556
+          completion: 2.778
+          cacheRead: 0.05556
+          context: 250000
+        'claude-opus-4-8':
+          prompt: 0.6666
+          completion: 3.333
+          cacheRead: 0.06666
+          context: 250000
+        'claude-opus-4-7':
+          prompt: 0.6666
+          completion: 3.333
+          cacheRead: 0.06666
+          context: 250000
+        'claude-opus-4-6':
+          prompt: 0.6666
+          completion: 3.333
+          cacheRead: 0.06666
+          context: 250000
+        'claude-sonnet-5':
+          prompt: 0.2666
+          completion: 1.333
+          cacheRead: 0.02666
+          context: 250000
+        'claude-sonnet-4-6':
+          prompt: 0.4
+          completion: 2.0
+          cacheRead: 0.04
+          context: 250000
       modelDisplayLabel: 'TensorGrid Claude'
       iconURL: '/images/tchat-mark.svg'
 
