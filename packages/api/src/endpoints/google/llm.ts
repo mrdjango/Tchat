@@ -4,7 +4,7 @@ import { googleSettings, AuthKeys, removeNullishValues } from 'librechat-data-pr
 import type { GoogleClientOptions, VertexAIClientOptions } from '@librechat/agents';
 import type { GoogleAIToolType } from '@librechat/agents/langchain/google-common';
 import type * as t from '~/types';
-import { mergeHeaders } from '~/utils/headers';
+import { mergeGoogleHeaders } from '~/utils/headers';
 import { isEnabled } from '~/utils';
 
 type GoogleThinkingLevel = 'THINKING_LEVEL_UNSPECIFIED' | 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
@@ -499,6 +499,13 @@ export function getGoogleConfig(
   provider: Providers.VERTEXAI | Providers.GOOGLE;
   /** @type {GoogleClientOptions | VertexAIClientOptions} */
   llmConfig: VertexAIClientOptions | GoogleClientOptions;
+  /**
+   * The thinking level in the form Gemini's OpenAI-compatible API takes (`reasoning_effort`), for a
+   * gateway that cannot read `thinkingConfig`. Set only for a level that was selected or configured
+   * as a default, never for the default a Flash model fills in, so the model default still applies.
+   * @see https://ai.google.dev/gemini-api/docs/openai#thinking
+   */
+  reasoningEffort?: string;
 } {
   let creds: t.GoogleCredentials = {};
   if (acceptRawApiKey && typeof credentials === 'string') {
@@ -538,6 +545,11 @@ export function getGoogleConfig(
     thinkingBudget = googleSettings.thinkingBudget.default,
     ...modelOptions
   } = sanitizeModelOptions(options.modelOptions);
+
+  /** The level the user selected, else the one the endpoint configures as its default. */
+  const selectedThinkingLevel =
+    normalizeGoogleThinkingLevel(thinkingLevel) ??
+    normalizeGoogleThinkingLevel(options.defaultParams?.thinkingLevel);
 
   let enableWebSearch = web_search;
   let enableUrlContext = url_context;
@@ -606,9 +618,8 @@ export function getGoogleConfig(
     const thinkingConfig: GoogleThinkingConfig = {
       includeThoughts: true,
     };
-    const normalizedThinkingLevel = normalizeGoogleThinkingLevel(thinkingLevel);
-    if (normalizedThinkingLevel) {
-      thinkingConfig.thinkingLevel = normalizedThinkingLevel;
+    if (selectedThinkingLevel) {
+      thinkingConfig.thinkingLevel = selectedThinkingLevel;
     }
     if (provider === Providers.GOOGLE) {
       (llmConfig as { thinkingConfig?: GoogleThinkingConfig }).thinkingConfig = thinkingConfig;
@@ -649,8 +660,8 @@ export function getGoogleConfig(
    * `options.headers` are already resolved by `initializeGoogle`, keeping the
    * key-derived `Authorization` out of placeholder/env expansion.
    */
-  if (options.headers && Object.keys(options.headers).length > 0) {
-    (llmConfig as GoogleClientOptions).customHeaders = mergeHeaders(
+  if (options.headers || (llmConfig as GoogleClientOptions).customHeaders) {
+    (llmConfig as GoogleClientOptions).customHeaders = mergeGoogleHeaders(
       options.headers,
       (llmConfig as GoogleClientOptions).customHeaders as Record<string, string> | undefined,
     );
@@ -800,6 +811,16 @@ export function getGoogleConfig(
     }
   }
 
+  const resolvedThinkingLevel = (llmConfig as { thinkingConfig?: GoogleThinkingConfig })
+    .thinkingConfig?.thinkingLevel;
+  const reasoningEffort =
+    selectedThinkingLevel != null &&
+    resolvedThinkingLevel != null &&
+    resolvedThinkingLevel !== 'THINKING_LEVEL_UNSPECIFIED' &&
+    options.dropParams?.includes('thinkingLevel') !== true
+      ? resolvedThinkingLevel.toLowerCase()
+      : undefined;
+
   // Return the final shape
   return {
     /** @type {GoogleAIToolType[]} */
@@ -808,5 +829,6 @@ export function getGoogleConfig(
     provider,
     /** @type {GoogleClientOptions | VertexAIClientOptions} */
     llmConfig,
+    ...(reasoningEffort != null && { reasoningEffort }),
   };
 }

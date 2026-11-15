@@ -5,13 +5,15 @@ import {
   isAgentsEndpoint,
   isEphemeralAgentId,
   getEphemeralSender,
+  resolveSpecArtifacts,
   encodeEphemeralAgentId,
   resolveMCPAppsPolicy,
+  resolveSpecUserToggles,
+  resolveSpecSkillsEnabled,
 } from 'librechat-data-provider';
 import type {
   AgentModelParameters,
   TImageSpec,
-  AgentToolOptions,
   TEphemeralAgent,
   TModelSpec,
   Agent,
@@ -20,12 +22,12 @@ import type { AppConfig } from '@librechat/data-schemas';
 import type { MCPClientCapabilityProfile } from '~/mcp/capabilities';
 import type { IsUnmodifiedAppMCPServer } from '~/agents/lookup';
 import type { ParsedServerConfig } from '~/mcp/types';
-import { ASK_USER_QUESTION_TOOL_NAME } from '~/agents/hitl/askUserQuestionTool';
+import {
+  resolveEphemeralTools,
+  resolveEphemeralMCPServers,
+  synthesizeToggleToolOptions,
+} from '~/agents/toggles';
 import { resolveMCPClientCapabilityProfile } from '~/mcp/capabilities';
-import { synthesizeBackgroundToolOptions } from '~/agents/background';
-import { mergeSynthesizedToolOptions } from '~/agents/selection';
-import { synthesizeIntentToolOptions } from '~/agents/intent';
-import { filterChatSelectableMCPServers } from '~/mcp/utils';
 import { getLookupConcurrency } from '~/utils/concurrency';
 import { getCustomEndpointConfig } from '~/app/config';
 import { mapWithConcurrency } from '~/utils/promise';
@@ -90,26 +92,26 @@ export async function loadEphemeralAgent(
   if (spec != null && spec !== '') {
     modelSpec = modelSpecs?.list?.find((s) => s.name === spec) ?? null;
   }
-  const ephemeralAgent: TEphemeralAgent | undefined = req.body?.ephemeralAgent;
+  const requestAgent: TEphemeralAgent | undefined = req.body?.ephemeralAgent;
+  /** A spec that gives the user no control over its tools makes what it
+   *  configures unconditional, so a request toggle against one is dropped. */
+  const ephemeralAgent: TEphemeralAgent | undefined = resolveSpecUserToggles(
+    requestAgent,
+    modelSpec,
+  );
   const userId = req.user?.id ?? '';
   const capabilityProfile = resolveMCPClientCapabilityProfile(
     resolveMCPAppsPolicy(req.config?.mcpSettings?.apps),
   );
-  /** The picker's own selection is narrowed to what the picker may offer; a
-   *  spec's servers are the operator's choice and are added after, so pinning a
-   *  chat-hidden server to a spec keeps working. */
   const mcpServers = new Set<string>(
-    await filterChatSelectableMCPServers(ephemeralAgent?.mcp, {
+    await resolveEphemeralMCPServers({
+      selected: ephemeralAgent?.mcp,
+      specServers: modelSpec?.mcpServers,
       userId,
       role: req.user?.role,
       getAccessibleMCPServers: deps.getAccessibleMCPServers,
     }),
   );
-  if (modelSpec?.mcpServers) {
-    for (const mcpServer of modelSpec.mcpServers) {
-      mcpServers.add(mcpServer);
-    }
-  }
   const pinned = getPinnedTools(req.config);
   /** Pinned servers nobody selected are best-effort; see `getPinnedTools`. */
   const optionalServers = new Set(pinned.mcpServers.filter((name) => !mcpServers.has(name)));
@@ -118,29 +120,19 @@ export async function loadEphemeralAgent(
   }
   /** Publish the servers this request will actually use back onto the body. The
    *  instruction path reads `req.body.ephemeralAgent.mcp` directly and prefers
-   *  it over the agent's tools, so it would otherwise both inject a hidden
-   *  server's `serverInstructions` and omit a spec-pinned server's. */
-  if (ephemeralAgent != null && Array.isArray(ephemeralAgent.mcp)) {
-    ephemeralAgent.mcp = [...mcpServers];
+   *  it over the agent's tools, so it would otherwise both inject a deselected
+   *  or hidden server's `serverInstructions` and omit a spec-pinned server's. */
+  if (requestAgent != null && Array.isArray(requestAgent.mcp)) {
+    requestAgent.mcp = [...mcpServers];
   }
-  const tools: string[] = [];
-  if (ephemeralAgent?.execute_code === true || modelSpec?.executeCode === true) {
-    tools.push(Tools.execute_code);
-  }
-  if (ephemeralAgent?.file_search === true || modelSpec?.fileSearch === true) {
-    tools.push(Tools.file_search);
-  }
-  if (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true || pinned.webSearch) {
+  /** Spec flags are defaults an explicit request toggle overrides. Same
+   *  downstream gating as persisted agents still applies: `createRun` only
+   *  equips `ask_user_question` when the request is HITL-capable, the agent is
+   *  not a subagent, and the admin hasn't excluded it. */
+  const tools: string[] = resolveEphemeralTools(ephemeralAgent, modelSpec);
+  /** Pinned web search rides on every chat, whatever the user or spec chose. */
+  if (pinned.webSearch && !tools.includes(Tools.web_search)) {
     tools.push(Tools.web_search);
-  }
-  if (ephemeralAgent?.memory === true || modelSpec?.memory === true) {
-    tools.push(Tools.memory);
-  }
-  /** Same downstream gating as persisted agents applies: `createRun` only
-   *  equips the tool when the request is HITL-capable, the agent is not a
-   *  subagent, and the admin hasn't excluded it (filteredTools/includedTools). */
-  if (ephemeralAgent?.ask_user_question === true || modelSpec?.askUserQuestion === true) {
-    tools.push(ASK_USER_QUESTION_TOOL_NAME);
   }
   /** The selection names an entry in `modelSpecs.imageList`, which decides both
    *  the tool and its model; `toolkitExpansion` adds the edit half. */
@@ -220,35 +212,22 @@ export async function loadEphemeralAgent(
     tools,
   };
 
-  const backgroundToolOptions: AgentToolOptions | undefined = synthesizeBackgroundToolOptions({
-    ephemeralAgent,
-    modelSpec,
-  });
-  if (backgroundToolOptions) {
-    result.tool_options = backgroundToolOptions;
-  }
-  const intentToolOptions: AgentToolOptions | undefined = synthesizeIntentToolOptions({
-    ephemeralAgent,
-    modelSpec,
-  });
-  if (intentToolOptions) {
-    result.tool_options = mergeSynthesizedToolOptions(result.tool_options, intentToolOptions);
+  const toggleToolOptions = synthesizeToggleToolOptions({ ephemeralAgent, modelSpec });
+  if (toggleToolOptions) {
+    result.tool_options = toggleToolOptions;
   }
 
-  if (ephemeralAgent?.artifacts) {
-    result.artifacts = ephemeralAgent.artifacts;
+  const artifacts = resolveSpecArtifacts(ephemeralAgent?.artifacts, modelSpec?.artifacts);
+  if (artifacts != null) {
+    result.artifacts = artifacts;
   }
   if (modelSpec?.subagents) {
     result.subagents = modelSpec.subagents;
   }
   if (modelSpec && Object.prototype.hasOwnProperty.call(modelSpec, 'skills')) {
-    if (modelSpec.skills === true) {
-      result.skills_enabled = true;
-    } else if (modelSpec.skills === false) {
-      result.skills_enabled = false;
-      result.skills = [];
-    } else if (Array.isArray(modelSpec.skills)) {
-      result.skills_enabled = true;
+    const skillsEnabled = resolveSpecSkillsEnabled(ephemeralAgent?.skills, modelSpec.skills);
+    result.skills_enabled = skillsEnabled;
+    if (!skillsEnabled || Array.isArray(modelSpec.skills)) {
       result.skills = [];
     }
   }

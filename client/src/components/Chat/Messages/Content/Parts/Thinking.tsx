@@ -9,32 +9,14 @@ import {
   type MouseEvent,
 } from 'react';
 import { Lightbulb, ChevronDown } from 'lucide-react';
-import { ROW_GLYPH_SLOT } from '@librechat/chat/components';
-import { Button, MorphIcon, TooltipAnchor } from '@librechat/client';
+import { Button, Shimmer, MorphIcon, TooltipAnchor } from '@librechat/client';
 import { ChevronUp as ChevronUpNode, ChevronDown as ChevronDownNode } from 'lucide';
+import { ROW_GLYPH_SLOT, CopyButton, useExpandCollapse } from '@librechat/chat/components';
 import type { FocusEvent, FC } from 'react';
 import { useMessagePartsHost } from '~/Providers/MessagePartsHostContext';
-import CopyButton from '~/components/Messages/Content/CopyButton';
-import { useLocalize, useExpandCollapse } from '~/hooks';
+import { cn, isRectVisible } from '~/utils';
 import { AnimatedText } from '../animate';
-import { cn } from '~/utils';
-
-/** Whether any part of `el` is inside the viewport and every clipping ancestor. */
-function isRectVisible(el: HTMLElement): boolean {
-  const rect = el.getBoundingClientRect();
-  let top = Math.max(rect.top, 0);
-  let bottom = Math.min(rect.bottom, window.innerHeight);
-  for (let node = el.parentElement; node != null && top < bottom; node = node.parentElement) {
-    const { overflowY } = getComputedStyle(node);
-    if (overflowY === 'visible') {
-      continue;
-    }
-    const clip = node.getBoundingClientRect();
-    top = Math.max(top, clip.top);
-    bottom = Math.min(bottom, clip.bottom);
-  }
-  return top < bottom;
-}
+import { useLocalize } from '~/hooks';
 
 /**
  * Tracks whether the referenced element is within the viewport. Mirrors the
@@ -171,38 +153,35 @@ export const ThinkingButton = memo(
               bottom margin edge, growing the line box and lifting the label off
               the icon's axis.
 
-              Only the generated-label entrance forces a nested span: it and the
-              sweep both drive `animation-name`, so they cannot share an element.
-              There the entrance must stay outside — the clipped element paints
-              the glyphs itself, so a descendant's opacity cannot fade them — and
-              the inner span takes `align-top` to keep the baseline rule above
-              from reopening the same gap.
-
-              `key` remounts the row so the entrance replays, and that restarts
-              the sweep with it. Reasoning labels revise on a 3s default against
-              a 4s sweep, so the restart is frequent; it reads as intentional
-              only while the entrance is there to cover it. With no entrance to
-              play, the row keeps its identity and the sweep runs unbroken. */}
-          <span
-            key={animateLabel ? label : undefined}
-            className={cn(
-              'min-w-0 truncate text-start font-medium',
-              shimmerLabel && !animateLabel && 'shimmer',
-              animateLabel &&
-                'animate-in fade-in-0 slide-in-from-bottom-1 duration-300 ease-out motion-reduce:animate-none',
-            )}
-          >
-            {shimmerLabel && animateLabel ? (
-              <span className="shimmer max-w-full truncate align-top">{label}</span>
-            ) : (
-              label
-            )}
-          </span>
+              The generated-label entrance keeps its own element so a revised
+              label can replay it: `key` remounts that row, and the sweep inside
+              restarts with it, which reads as intentional only while the
+              entrance is there to cover it. The inner span takes `align-top` to
+              keep the baseline rule above from reopening the same gap. With no
+              entrance to play, the row keeps its identity and the sweep runs
+              unbroken. */}
+          {animateLabel ? (
+            <span
+              key={label}
+              className="animate-in fade-in-0 slide-in-from-bottom-1 min-w-0 truncate text-start font-medium duration-300 ease-out motion-reduce:animate-none"
+            >
+              {shimmerLabel ? (
+                <Shimmer className="max-w-full truncate align-top">{label}</Shimmer>
+              ) : (
+                label
+              )}
+            </span>
+          ) : (
+            <Shimmer active={shimmerLabel} className="min-w-0 truncate text-start font-medium">
+              {label}
+            </Shimmer>
+          )}
         </button>
         {content && showCopyButton && isExpanded && (
           <CopyButton
             isCopied={isCopied}
             iconOnly
+            compact
             onClick={handleCopy}
             label={localize('com_ui_copy_thoughts_to_clipboard')}
             copiedLabel={localize('com_ui_copied_to_clipboard')}
