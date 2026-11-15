@@ -13,9 +13,9 @@ import {
   getMCPToolCatalogGeneration,
   getMCPAppToolsPublicationGeneration,
 } from '~/mcp/toolsChanged';
-import { STANDARD_MCP_CAPABILITY_PROFILE } from '~/mcp/capabilities';
 import { MCPServerInspector } from '~/mcp/registry/MCPServerInspector';
 import { MCPServersRegistry } from '~/mcp/registry/MCPServersRegistry';
+import { STANDARD_MCP_CAPABILITY_PROFILE } from '~/mcp/capabilities';
 import { createMCPCatalogStore } from '~/mcp/catalog/store';
 import { createMCPToolCacheService } from '~/mcp/tools';
 import { getMCPToolsLookup } from './lookup';

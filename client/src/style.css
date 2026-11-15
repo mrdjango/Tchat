@@ -140,9 +140,6 @@ html {
 html.high-contrast {
   /* A 0.5rem bar is a small target to hit and a thin thing to see. */
   --scrollbar-size: 0.75rem;
-  /* Keep both animated text stops at the AAA ratios declared by the palette. */
-  --shimmer-base-alpha: 1;
-  --shimmer-dip-alpha: 1;
 }
 html.high-contrast ::-webkit-scrollbar-thumb {
   /* The 10%-alpha thumb is invisible against a pure black or white canvas. */
@@ -286,36 +283,6 @@ html.high-contrast.dark .btn-neutral {
 html.high-contrast .btn-neutral:hover,
 html.high-contrast.dark .btn-neutral:hover {
   background-color: rgb(var(--surface-hover));
-}
-
-.icon-sm {
-  stroke-width: 2;
-  height: 1rem;
-  width: 1rem;
-}
-.icon-md,
-.icon-md-heavy {
-  stroke-width: 1.5;
-  height: 1.125rem;
-  width: 1.125rem;
-}
-.icon-md-heavy {
-  stroke-width: 2.5;
-}
-.icon-lg {
-  stroke-width: 1.5;
-  height: 1.5rem;
-  width: 1.5rem;
-}
-.icon-xl {
-  stroke-width: 1.5;
-  height: 1.75rem;
-  width: 1.75rem;
-}
-.icon-2xl {
-  stroke-width: 1.5;
-  height: 2rem;
-  width: 2rem;
 }
 
 /* Forced-colors overrides the `background-color: currentColor` a masked CustomIcon
@@ -1865,6 +1832,9 @@ html {
   transform-origin: 50% 50%;
 }
 
+/* `.message-content` is also published in @librechat/client (theme/parts.css) for other hosts.
+ * That stylesheet loads before this one, so `.prose` and `.markdown` above would win; keeping the
+ * rule here at its original place preserves the app's message line height and width. */
 .message-content,
 .message-editor-text {
   font-size: var(--markdown-font-size, var(--font-size-base));
@@ -1879,8 +1849,7 @@ html {
 
 /* iOS zooms into a focused field under 16px and the installed PWA never zooms back out. */
 @media (any-pointer: coarse) {
-  .message-editor-text,
-  .composer-text {
+  .message-editor-text {
     font-size: max(16px, var(--markdown-font-size, var(--font-size-base)));
   }
 }
@@ -1897,26 +1866,6 @@ html {
 .code-analyze-block pre,
 .code-analyze-block .overflow-y-auto {
   font-size: var(--markdown-font-size, var(--font-size-base));
-}
-
-.tool-status-text {
-  font-size: calc(0.9 * var(--markdown-font-size, var(--font-size-base)));
-  line-height: calc(1.25 * 0.9 * var(--markdown-font-size, var(--font-size-base)));
-}
-
-.progress-text-wrapper {
-  font-size: calc(0.9 * var(--markdown-font-size, var(--font-size-base)));
-  line-height: calc(1.25 * 0.9 * var(--markdown-font-size, var(--font-size-base)));
-}
-
-.progress-text-content {
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.progress-text-wrapper button {
-  font-size: inherit;
-  line-height: inherit;
 }
 
 .tooltip {
@@ -2171,61 +2120,12 @@ html[data-input-modality='keyboard']
   transform: scale(1) translate(0, 0);
 }
 
-/**
- * Composer popovers. Its own curve rather than `animate-popover`'s: these are
- * large surfaces, and the shared 150ms ease-in-out reads as a snap at that size.
- * Decelerating hard from the first frame and then settling is what makes a panel
- * feel placed rather than switched on. Leaving is quicker than entering, so
- * dismissing never feels like waiting.
- */
-.animate-composer-popover {
-  /* Ariakit resolves this to the edge nearest the trigger, so the panel grows
-     out of the button whether it opens below or flips above. `animate-popover`
-     pins the origin to the top and translates down, which is right one way
-     round and backwards the other. */
-  transform-origin: var(--popover-transform-origin, top center);
-  opacity: 0;
-  transform: scale(0.94);
-  transition:
-    opacity 190ms cubic-bezier(0.32, 0.72, 0, 1),
-    transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
-  will-change: transform, opacity;
-}
-/* Resizable anchored panels share the composer entrance and exit clock. */
-.animate-composer-popover-resize {
-  transition-property: opacity, transform, width, max-height;
-}
-.animate-composer-popover[data-enter] {
-  opacity: 1;
-  transform: scale(1);
-}
-.animate-composer-popover[data-leave] {
-  transition-duration: 120ms, 140ms;
-}
-
 /* The Thinking pill's label slot resizes with the popover it opens: same
-   duration and curve as the opacity leg above. */
+   duration and curve as the opacity leg of `.animate-composer-popover`. */
 .composer-slot-resize {
   transition: width 190ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/**
- * Palette list. `.scrollbar-hover` fades its thumb in on pointer-over, so on a
- * list this dense the scrollbar reads as appearing out of nowhere, and where
- * the platform draws classic rather than overlay scrollbars, a gutter that only
- * exists while the thumb does shifts every row sideways under the cursor. The
- * thumb stays drawn and the gutter stays reserved; the class is only applied
- * when the list actually overflows, so a short list keeps its full width.
- *
- * Standard properties only, deliberately: styling `::-webkit-scrollbar` opts an
- * element out of overlay scrollbars altogether, which would spend 8px of gutter
- * on the platforms that never had the problem.
- */
-.composer-palette-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(var(--border-medium) / var(--border-medium-alpha, 1)) transparent;
-  scrollbar-gutter: stable;
-}
 /**
  * The thinking-level slider's stops. Position and size glide on a spring with a
  * slight overshoot, so the thumb and the fill settle onto a stop rather than
@@ -2316,80 +2216,18 @@ html[data-input-modality='keyboard']
   animation: composer-label-in-down 280ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/** Trigger glyphs that turn as their popover opens, on the same curve. */
-.animate-composer-icon {
-  /* Tailwind v4's rotate-* utilities set `rotate`, not `transform`. */
-  transition-property: transform, rotate;
-  transition-duration: 260ms;
-  transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-/**
- * The palette growing or shrinking as its list rearranges. The rows themselves
- * are moved from `Palette.tsx`, which plays each one back to where it was after
- * the list has been redrawn; a re-inserted node drops any transition it was
- * about to run, and starring an entry re-inserts every row it passed. The
- * panel's own height has no such problem: the list box is never re-inserted.
- */
-.composer-palette-rows .ReactVirtualized__Grid {
-  transition: height 260ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-/* Held for the frame a search redraws in: the list is being replaced rather
-   than rearranged there, and growing into its new size reads as the panel
-   lagging behind the typing. */
-.composer-palette-instant .ReactVirtualized__Grid {
-  transition-duration: 0s;
-}
-@keyframes composer-palette-row {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-.animate-composer-palette-row {
-  animation: composer-palette-row 200ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-@keyframes composer-palette-row-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-/* Accelerating away, unlike everything else here: the shared decelerating curve
-   spends this beat almost entirely at zero, leaving the rows gone well before
-   the list starts closing over them. */
-.animate-composer-palette-row-out {
-  animation: composer-palette-row-out 110ms cubic-bezier(0.4, 0, 1, 1) both;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .animate-composer-popover,
-  .animate-composer-popover[data-enter],
-  .animate-composer-popover[data-leave],
-  .animate-composer-icon,
   .composer-slot-resize,
   .composer-effort-glide,
   .composer-effort-thumb,
-  .composer-effort-fill,
-  .composer-palette-rows .ReactVirtualized__Grid {
+  .composer-effort-fill {
     transition-duration: 1ms;
   }
-  .animate-composer-palette-row,
-  .animate-composer-palette-row-out,
   .composer-label-out-up,
   .composer-label-out-down,
   .composer-label-in-up,
   .composer-label-in-down {
     animation-duration: 1ms;
-  }
-  .animate-composer-popover,
-  .animate-composer-popover[data-enter],
-  .animate-composer-popover[data-leave] {
-    transform: none;
   }
 }
 
@@ -2464,66 +2302,6 @@ html[data-input-modality='keyboard']
 
 .badge-icon {
   transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-@keyframes shimmer-rtl {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-/* The sweep every in-flight label shares: a running tool call, streaming
-   reasoning, the elapsed timer. Painted from theme roles rather than fixed
-   black/white keyed off `.dark`, so a stored or custom theme restates it the
-   way it restates any other color. Unset, the base falls back to whatever
-   `--text-primary` is in scope AT THE LABEL — resolving it in a `:root`
-   declaration instead would freeze the default and ignore theme scopes applied
-   further down. Dark declares a base outright: its established value is dimmer
-   than that theme's text color rather than equal to it. */
-.shimmer {
-  display: inline-block;
-  position: relative;
-  background: linear-gradient(
-    90deg,
-    rgb(var(--shimmer-base, var(--text-primary)) / var(--shimmer-base-alpha, 1)) 25%,
-    rgb(var(--shimmer-dip) / var(--shimmer-dip-alpha, 1)) 50%,
-    rgb(var(--shimmer-base, var(--text-primary)) / var(--shimmer-base-alpha, 1)) 75%
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer 4s linear infinite;
-}
-
-[dir='rtl'] .shimmer,
-.shimmer:dir(rtl) {
-  animation-name: shimmer-rtl;
-}
-
-/* Halting the animation alone is not a fallback: the background would settle
-   at position 0 and show only half the sweep, stranding the tail of the label
-   in the near-invisible dip. Drop the gradient and hand the glyphs back to the
-   color they would have had. */
-@media (prefers-reduced-motion: reduce) {
-  .shimmer,
-  [dir='rtl'] .shimmer {
-    background: none;
-    animation: none;
-    -webkit-text-fill-color: currentcolor;
-  }
 }
 
 .sharepoint-picker-bg {
