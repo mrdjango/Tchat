@@ -27,8 +27,7 @@ import {
   resolveAgentSkillsScope,
 } from 'librechat-data-provider';
 import type { TImageChoice, TSkillSummary, TToolFavoriteType } from 'librechat-data-provider';
-import type { ItemStatus } from '~/components/SidePanel/Agents/Tools/items/types';
-import type { TranslationKeys } from '~/hooks/useLocalize';
+import type { PaletteEntryView } from '@librechat/chat/react';
 import {
   useHasAccess,
   useAuthContext,
@@ -39,7 +38,7 @@ import {
 } from '~/hooks';
 import { imageOptionChips } from '~/components/Chat/Menus/Endpoints/Tchat/imageOptionChips';
 import { imageChoicesAtom } from '~/components/Chat/Menus/Endpoints/Tchat/imageOptions';
-import { getStatusColor, getStatusTextKey } from '~/components/MCP/mcpServerUtils';
+import { getStatusColor, getMCPStatusLabelKey } from '~/components/MCP/mcpServerUtils';
 import { filterSkillsForPopover } from '~/components/Chat/Input/SkillsCommand';
 import { useSkillsInfiniteQuery, useGetStartupConfig } from '~/data-provider';
 import { useAgentsMapContext, useBadgeRowContext } from '~/Providers';
@@ -100,7 +99,7 @@ export interface PaletteEntry {
    *  "Show all" dialog's "Made by you" view. */
   ownedByUser?: boolean;
   /** Connection state of an MCP server, drawn on the row and its card. */
-  status?: ItemStatus;
+  status?: PaletteEntryView['status'];
 }
 
 /** Accumulates skill pages so client-side search covers the full catalog. */
@@ -565,20 +564,23 @@ export default function usePaletteEntries({
       mcpValues,
       toggleServerSelection,
       connectionStatus,
+      connectionViews,
       initializeServer,
       isInitializing,
       getServerStatusIconProps,
     } = mcpServerManager ?? {};
     /* The same vocabulary as the MCP menu this palette replaced. Its
        "connecting" string takes the server name, which the row already shows. */
-    const getServerStatus = (serverName: string): ItemStatus => {
-      const key = getStatusTextKey(serverName, connectionStatus, isInitializing);
+    const getServerStatus = (serverName: string): NonNullable<PaletteEntryView['status']> => {
+      const view = connectionViews?.[serverName];
+      const key = getMCPStatusLabelKey(
+        connectionStatus?.[serverName],
+        isInitializing?.(serverName),
+        view,
+      );
       return {
-        label:
-          key === 'com_nav_mcp_status_connecting'
-            ? localize('com_ui_connecting')
-            : localize(key as TranslationKeys),
-        tone: getStatusColor(serverName, connectionStatus, isInitializing),
+        label: key && localize(key === 'com_nav_mcp_status_connecting' ? 'com_ui_connecting' : key),
+        tone: getStatusColor(serverName, connectionStatus, isInitializing, view),
       };
     };
     if (toolsEnabled && canUseMcp && selectableServers) {
@@ -590,7 +592,10 @@ export default function usePaletteEntries({
       for (const server of selectableServers) {
         const title = server.config?.title || server.serverName;
         const statusProps = getServerStatusIconProps?.(server.serverName);
-        /* A row for a server that is not connected routes through the manager
+        const canUse =
+          connectionViews?.[server.serverName]?.canUse ??
+          connectionStatus?.[server.serverName]?.connectionState === 'connected';
+        /* A row for a server that is not ready routes through the manager
            instead of blindly selecting: credentials first when the server wants
            custom variables, otherwise a reinitialize, which runs the OAuth
            flow when needed and selects the server itself once it is ready.
@@ -602,10 +607,7 @@ export default function usePaletteEntries({
             toggleServerSelection?.(server.serverName);
             return;
           }
-          /* An unknown status means the server has not reported a connection
-             yet, which is not the same as being connected: treat it like a
-             disconnected server so it initializes before it can be selected. */
-          if (connectionStatus?.[server.serverName]?.connectionState !== 'connected') {
+          if (!canUse) {
             if (statusProps?.isInitializing) {
               return;
             }
@@ -618,7 +620,7 @@ export default function usePaletteEntries({
           }
           toggleServerSelection?.(server.serverName);
         };
-        /* A connected server keeps its per-user variables editable: the
+        /* A ready server keeps its per-user variables editable: the
            palette row carries the Configure action the replaced menu had. */
         const getServerModes = (): PaletteMode[] | undefined => {
           if (statusProps?.isInitializing === true && statusProps.canCancel === true) {
@@ -632,10 +634,7 @@ export default function usePaletteEntries({
               },
             ];
           }
-          if (
-            statusProps?.hasCustomUserVars === true &&
-            connectionStatus?.[server.serverName]?.connectionState === 'connected'
-          ) {
+          if (statusProps?.hasCustomUserVars === true && canUse) {
             return [
               {
                 id: 'configure',

@@ -773,6 +773,13 @@ export namespace Agents {
 
   export interface SummarizeDeltaEvent {
     id: string;
+    /**
+     * Discard what the step has streamed so far, then apply `delta`. Deltas arrive while the
+     * provider is still responding, so an attempt that is then abandoned (a retry, a fallback
+     * provider) has already shown text; the next attempt's first delta carries this, or a delta
+     * with no content when no attempt follows.
+     */
+    reset?: boolean;
     delta: {
       summary: SummaryContentPart;
     };
@@ -1323,3 +1330,7 @@ export type AgentFile = {
   object: string;
   purpose: 'fine-tune' | 'fine-tune-results' | 'agents' | 'agents_output';
 };
+
+/** Display identity shared by saved agents and model-spec transcript targets. */
+export type AgentDisplay = Pick<Agent, 'id' | 'name' | 'provider' | 'model' | 'avatar'>;
+export type ModelSpecHandoffTarget = AgentDisplay;
