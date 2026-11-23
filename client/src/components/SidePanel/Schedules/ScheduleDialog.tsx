@@ -33,6 +33,7 @@ import type {
   TScheduleCadence,
   ScheduleFrequency,
 } from 'librechat-data-provider';
+import type { Authorization } from './Authorize';
 import type { TranslationKeys } from '~/hooks';
 import {
   describeCadence,
@@ -50,12 +51,18 @@ import {
   useCreateScheduleMutation,
   useUpdateScheduleMutation,
 } from '~/data-provider';
-import { scheduleMCPErrorMessage, scheduleMCPErrorOutcomes } from './errors';
+import {
+  scheduleMCPErrorMessage,
+  scheduleMCPErrorOutcomes,
+  scheduleAuthorizationRejected,
+} from './errors';
+import { useScheduleMCPOfferRefresh } from '~/data-provider/Schedules/consent';
 import { useLocalize, useClockFormat, useWeekStart } from '~/hooks';
 import { useChatProjectPicker } from './useScheduleProjects';
 import { VariableEditor } from '~/components/Variables';
 import ScheduleMCPRecovery from './ScheduleMCPRecovery';
 import { rotateWeekFrom } from '~/utils/clock';
+import Authorize from './Authorize';
 import { cn } from '~/utils';
 
 interface ScheduleDialogProps {
@@ -248,6 +255,12 @@ export default function ScheduleDialog({
   const pinnedProjectId = schedulesData?.limits.projectId;
   const minIntervalMinutes = schedulesData?.limits.minIntervalMinutes;
   const requireProject = schedulesData?.limits.requireProject === true;
+  /**
+   * Where consent is on, a schedule is authorized in the same step that creates it, and
+   * again in the same step that edits it: an edit ends the grant it had.
+   */
+  const authorizes = schedulesData?.limits.mcpConsent === true;
+  const [authorization, setAuthorization] = useState<Authorization>({ value: null, owed: false });
   const {
     items: loadedProjectItems,
     namesById: projectNames,
@@ -327,6 +340,7 @@ export default function ScheduleDialog({
   /** Fingerprint of the payload the current key was last attempted with. */
   const lastAttemptedPayload = useRef<string | null>(null);
 
+  const refreshOffer = useScheduleMCPOfferRefresh();
   const createSchedule = useCreateScheduleMutation({
     onSuccess: () => {
       setMCPRecoveryOutcomes([]);
@@ -337,8 +351,14 @@ export default function ScheduleDialog({
     },
     onError: (error) => {
       setMCPRecoveryOutcomes(scheduleMCPErrorOutcomes(error));
+      // What could be allowed changed under the owner's choice. The form stays open on the
+      // new offer, with the ticks that still apply, so the next create is not turned down too.
+      const rejected = scheduleAuthorizationRejected(error);
+      if (rejected) refreshOffer();
       showToast({
-        message: scheduleMCPErrorMessage(error, localize) ?? localize('com_ui_error'),
+        message:
+          scheduleMCPErrorMessage(error, localize) ??
+          localize(rejected ? 'com_ui_schedule_authorize_changed' : 'com_ui_error'),
         status: 'error',
       });
     },
@@ -353,10 +373,14 @@ export default function ScheduleDialog({
     onError: (error) => {
       setMCPRecoveryOutcomes(scheduleMCPErrorOutcomes(error));
       const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
+      // As on create: the offer the choice was made from is not the one the server holds.
+      const rejected = scheduleAuthorizationRejected(error);
+      if (rejected) refreshOffer();
+      const fallback = status === 409 ? 'com_ui_schedule_conflict' : 'com_ui_error';
       showToast({
         message:
           scheduleMCPErrorMessage(error, localize) ??
-          localize(status === 409 ? 'com_ui_schedule_conflict' : 'com_ui_error'),
+          localize(rejected ? 'com_ui_schedule_authorize_changed' : fallback),
         status: 'error',
       });
     },
@@ -418,6 +442,7 @@ export default function ScheduleDialog({
         // silently overwritten — the server answers 409 instead.
         payload: {
           ...payload,
+          ...(authorizes && authorization.value && { authorization: authorization.value }),
           ...(openedConfigRevision.current != null
             ? { expectedConfigRevision: openedConfigRevision.current }
             : {}),
@@ -436,6 +461,7 @@ export default function ScheduleDialog({
       timezone: values.timezone,
       target: 'new' as const,
       enabled: true,
+      ...(authorizes && authorization.value && { authorization: authorization.value }),
     };
     // STABLE across retries of the SAME intent, which is the whole point: the server
     // commits the row and arms it in two writes, so a failure between them leaves the
@@ -524,7 +550,13 @@ export default function ScheduleDialog({
     return null;
   };
   const cadenceError = resolveCadenceError();
-  const canSubmit = cronIsValid && daysAreValid && !belowFloor && !isLoading;
+  const canSubmit =
+    cronIsValid &&
+    daysAreValid &&
+    !belowFloor &&
+    !isLoading &&
+    // Something to allow, and nothing allowed yet: the schedule would only be refused its tools.
+    !(authorizes && authorization.owed && authorization.value == null);
 
   /** The offset disambiguates two similar names, which matters now that the zone is
    *  something the user picks rather than the browser's own. Memoized because it
@@ -969,6 +1001,16 @@ export default function ScheduleDialog({
                 </div>
               )}
             </div>
+            {authorizes && selectedAgentId !== '' && (
+              <Authorize
+                key={selectedAgentId}
+                agentId={selectedAgentId}
+                scheduleId={
+                  schedule && selectedAgentId === schedule.agent_id ? schedule.id : undefined
+                }
+                onChange={setAuthorization}
+              />
+            )}
           </form>
         }
         buttons={

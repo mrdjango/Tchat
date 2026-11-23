@@ -130,9 +130,6 @@
     }
   },
   "client/src/components/Chat/Messages/Content/ActivityPhaseGroup.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 2
-    },
     "shadcn/no-inline-styles": {
       "count": 2
     }
@@ -206,25 +203,7 @@
       "count": 1
     }
   },
-  "client/src/components/Chat/Messages/Content/Parts/Reasoning.tsx": {
-    "shadcn/no-inline-styles": {
-      "count": 4
-    },
-    "shadcn/no-restyle": {
-      "count": 2
-    }
-  },
   "client/src/components/Chat/Messages/Content/Parts/SkillCall.tsx": {
-    "shadcn/no-inline-styles": {
-      "count": 1
-    }
-  },
-  "client/src/components/Chat/Messages/Content/Parts/SubagentCall.tsx": {
-    "design/disabled-recipe": {
-      "count": 1
-    }
-  },
-  "client/src/components/Chat/Messages/Content/Parts/Thinking.tsx": {
     "shadcn/no-inline-styles": {
       "count": 1
     }
@@ -283,19 +262,6 @@
       "count": 2
     },
     "shadcn/require-static-classes": {
-      "count": 1
-    }
-  },
-  "client/src/components/Chat/Messages/Content/WebSearch.tsx": {
-    "shadcn/no-inline-styles": {
-      "count": 1
-    },
-    "shadcn/no-restyle": {
-      "count": 12
-    }
-  },
-  "client/src/components/Chat/Messages/Content/animate.tsx": {
-    "shadcn/no-inline-styles": {
       "count": 1
     }
   },

@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type {
-  Agent,
+  AgentDisplay,
   TFile,
   TAttachment,
   SearchResultData,
@@ -204,6 +204,11 @@ export interface MessagePartsHost {
   useMessage: () => MessagePartMessage;
   /** Renders markdown with the app's renderer. */
   renderMarkdown: (props: MessagePartsMarkdownProps) => ReactNode;
+  /**
+   * Renders plain text while it is still streaming, so a reasoning stream can fade its words in.
+   * Absent, the part shows the text as it is.
+   */
+  renderStreamingText?: (text: string) => ReactNode;
   /** Renders an attached image with the app's image viewer. */
   renderImage: (props: MessagePartsImageProps) => ReactNode;
   /** Renders the app's preview dialog for an attached file. */
@@ -211,13 +216,13 @@ export interface MessagePartsHost {
   /** Whether streamed text fades in word by word: the viewer's setting, unless motion is reduced. */
   useSmoothStreaming: () => boolean;
   /** An agent the viewer can see, by id. */
-  useAgent: (agentId: string) => Agent | undefined;
+  useAgent: (agentId: string) => AgentDisplay | undefined;
   /** Draws a message's content parts with the app's renderer. */
   renderContentParts: (props: ContentPartsSlotProps) => ReactNode;
   /** Renders an agent's avatar; `undefined` when the agent is unknown. */
-  renderAgentIcon: (agent: Agent | undefined) => ReactNode;
+  renderAgentIcon: (agent: AgentDisplay | undefined) => ReactNode;
   /** Renders an agent's bare inline avatar, without the message icon around it. */
-  renderAgentAvatar: (agent: Agent | undefined) => ReactNode;
+  renderAgentAvatar: (agent: AgentDisplay | undefined) => ReactNode;
   /** The viewer's font size utility, applied to reasoning and summary text. */
   useFontSize: () => string;
   /** Whether the viewer wants reasoning expanded by default. */

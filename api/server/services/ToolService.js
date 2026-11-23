@@ -2061,6 +2061,7 @@ async function loadAgentTools({
       description: functionSignature.description,
       streamId,
       jobCreatedAt,
+      unattended,
       useSSRFProtection: !Array.isArray(_allowedDomains) || _allowedDomains.length === 0,
       allowedAddresses: _allowedAddresses,
       timeoutMs: getOutboundTimeoutMs(appConfig, 'actionsMs'),
@@ -2372,6 +2373,7 @@ async function loadToolsForExecution({
               }),
               linkedWorktrees: codeExecutionContext.codeWorkspace.linkedWorktrees,
               nativeSandbox: codeExecutionContext.codeWorkspace.nativeSandbox,
+              detachedCommands: codeExecutionContext.codeWorkspace.detachedCommands,
               environment: codeExecutionContext.codeWorkspace.environment,
               gitIdentity: agent?.git_identity,
               maxTimeoutMs: resolveAttachedWorkspaceCommandTimeoutMax(
@@ -2511,6 +2513,7 @@ async function loadToolsForExecution({
       appConfig,
       streamId,
       jobCreatedAt,
+      unattended,
       actionToolNames,
       preparedActionSnapshot,
     });
@@ -2564,6 +2567,7 @@ async function loadActionToolsForExecution({
   appConfig,
   streamId,
   jobCreatedAt,
+  unattended,
   actionToolNames,
   preparedActionSnapshot,
 }) {
@@ -2660,6 +2664,7 @@ async function loadActionToolsForExecution({
       action,
       streamId,
       jobCreatedAt,
+      unattended,
       zodSchema,
       encrypted,
       requestBuilder,
