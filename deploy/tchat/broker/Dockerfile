@@ -2,7 +2,7 @@
 #
 # Zero runtime dependencies, so there is no install step and nothing to audit
 # beyond the Node base image and the sources in src/.
-FROM node:24.16.0-alpine
+FROM docker.io/library/node:24.16.0-alpine
 
 USER root
 RUN apk add --no-cache curl gnupg \

@@ -21,7 +21,7 @@ services:
     # checkpoint and losing whatever was written since. Verified on the host:
     # 8.0.20 and 8.2.12 both exit 139, 7.0.40 runs clean.
     # Revisit once a released 8.x supports these kernels.
-    image: mongo:7.0.40
+    image: docker.io/library/mongo:7.0.40
     restart: unless-stopped
     command: ["mongod", "--noauth", "--bind_ip_all"]
     volumes:
@@ -36,7 +36,7 @@ services:
       - internal
 
   tchat-meili:
-    image: getmeili/meilisearch:v1.35.1
+    image: docker.io/getmeili/meilisearch:v1.35.1
     restart: unless-stopped
     environment:
       MEILI_NO_ANALYTICS: "true"
@@ -169,7 +169,7 @@ services:
       - internal
 
   tchat-proxy:
-    image: nginx:1.29-alpine
+    image: docker.io/library/nginx:1.29-alpine
     restart: unless-stopped
     labels:
       tchat.release: ${TCHAT_IMAGE_TAG:-unset}
@@ -205,7 +205,7 @@ services:
   # stack environment before enabling the profile.
   tchat-vectordb:
     profiles: ["rag"]
-    image: pgvector/pgvector:0.8.0-pg15-trixie
+    image: docker.io/pgvector/pgvector:0.8.0-pg15-trixie
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${TCHAT_VECTOR_DB:-tchat_vectors}
